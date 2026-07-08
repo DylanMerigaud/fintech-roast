@@ -1,0 +1,12 @@
+{
+  "name": "fintech-roast",
+  "displayName": "fintech-roast",
+  "description": "Roasts the code that touches money: audits a repo against a sourced rulebook of money-handling failures (storage, rounding, idempotency, ledgers, FX, time, taxes, serialization, testing) with an adversarial verification pass before anything is reported.",
+  "author": {
+    "name": "Dylan Merigaud"
+  },
+  "homepage": "https://github.com/DylanMerigaud/fintech-roast",
+  "repository": "https://github.com/DylanMerigaud/fintech-roast",
+  "license": "MIT",
+  "keywords": ["fintech", "money", "payments", "audit", "code-review", "rounding", "ledger"]
+}

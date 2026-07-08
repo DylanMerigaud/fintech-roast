@@ -1,0 +1,16 @@
+{
+  "name": "fintech-roast",
+  "owner": {
+    "name": "Dylan Merigaud"
+  },
+  "description": "An agent that roasts the code that touches money.",
+  "plugins": [
+    {
+      "name": "fintech-roast",
+      "source": "./",
+      "description": "Audits a repo against a sourced rulebook of money-handling failures, with adversarial verification of every finding.",
+      "category": "code-review",
+      "tags": ["fintech", "money", "audit"]
+    }
+  ]
+}
