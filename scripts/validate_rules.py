@@ -54,7 +54,7 @@ def check_dashes() -> None:
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
         for i, line in enumerate(text.splitlines(), 1):
-            if "—" in line or "–" in line:
+            if "\u2014" in line or "\u2013" in line:
                 err(f"{rel}:{i}: em/en dash found (policy: ASCII punctuation only)")
 
 
