@@ -10,6 +10,7 @@ Part of the [fintech-roast](../README.md) rulebook. See [README.md](README.md) f
 
 - A convert() helper used symmetrically, e.g. `convert(convert(amount, 'USD', 'EUR'), 'EUR', 'USD')`, or a test asserting the two are equal (`assertEqual(x, backToX)`).
 - Reverse conversion computed as `amount / rate` or `amount * (1/rate)` instead of fetching an independent inverse or opposite-pair quote: look for `1 / rate`, `1.0/rate`, `reciprocal`, `invert(rate)` used to settle or book a value (not just to display).
+- Python: `1.0 / rate` (or `1 / rate`) on a float used to build the return leg, then the there-and-back result compared for equality (`assert back == amount`); a `convert()` that rounds with `round(..., 2)` / `Decimal.quantize` on each leg and is called twice for a round-trip; a `pytest.approx` or `==` check that expects `convert(convert(x, "USD", "EUR"), "EUR", "USD")` to return `x`.
 - Cross-currency conversion done in one multiply (from -> to) with no intermediate base leg, especially between two non-USD currencies (EUR->GBP as a single stored rate), where a same-time round-trip is then expected to reconcile to the cent.
 - Rounding applied on every leg (`round`, `.quantize(`, `toFixed(2)`, `Math.round(x*100)/100`, `ROUND_HALF_UP`) inside a function called twice for a there-and-back conversion, with the two ends compared for equality.
 - Equality or invariant checks on money that survive a conversion cycle: `if (recomputedTotal == originalTotal)`, or a reconciliation that expects converted balances to net to exactly zero after a round-trip.
@@ -22,6 +23,19 @@ Each conversion leg rounds to the target currency's minor unit, so the operation
 **Fix**
 
 Treat conversion as one-way and lossy. Never derive the reverse leg by dividing; fetch an independent inverse or opposite-pair rate for the return trip, and expect A -> B -> A to differ from A. Round exactly once, at the boundary to the currency's minor unit, and keep full precision internally; store the pre-rounded high-precision result if you need to reconcile. For cross-currency pairs that share no direct quote, convert through a base currency (triangulate) rather than compounding a single blended rate. In reconciliation, compare against the originally stored source amounts (see FX-3), not against a value you recomputed by reversing the conversion, and allow a documented minor-unit tolerance for residuals.
+
+```python
+# Python: the reverse leg is a fresh quote, not 1/rate, and equality is not expected.
+from decimal import Decimal, ROUND_HALF_UP
+
+def to_minor(amount: Decimal, exp: str) -> Decimal:
+    return amount.quantize(Decimal(exp), rounding=ROUND_HALF_UP)
+
+usd = Decimal("100.00")
+eur = to_minor(usd * usd_to_eur, "0.01")     # one rounding, at the boundary
+back = to_minor(eur * eur_to_usd, "0.01")     # eur_to_usd is an independent quote, NOT 1/usd_to_eur
+assert abs(back - usd) <= Decimal("0.02")     # tolerance, never assert back == usd
+```
 
 **False positives**
 
@@ -45,8 +59,9 @@ Treat conversion as one-way and lossy. Never derive the reverse leg by dividing;
 - Conversion at read or report time using a live lookup: `getRate(from,to) * amount` inside a serializer, invoice renderer, or dashboard query, with no rate column persisted on the row.
 - A converted amount column with no adjacent rate columns: schema has `amount_usd` but lacks `fx_rate`, `fx_rate_source`, and `fx_rate_timestamp` (or `rate_date`).
 - Rate fetched from a provider (ECB, openexchangerates, a bank API, `rates[to]`) and used immediately without storing the returned value and the as-of time.
+- Python: a mutable module-level `RATES = {...}` dict (or a global refreshed by a scheduler) read at conversion time as the only rate source, so no per-row `(rate, source, as_of)` is captured; `requests.get(...).json()["rates"][to]` multiplied straight into an amount with nothing persisted; a `dataclass`/model row that has `amount_usd` but no `fx_rate` / `fx_rate_source` / `fx_rate_as_of` fields.
 - Historical figures recomputed with today's rate: reports that call the same convert() over past transactions, or a nightly job that re-values old rows using the current rate table.
-- A single mutable `rates` config or table overwritten in place (`UPDATE fx_rates SET rate = ...`) so past conversions can no longer be reproduced.
+- A single mutable `rates` config or table overwritten in place (`UPDATE fx_rates SET rate = ...`, or `RATES[pair] = new_rate` in Python) so past conversions can no longer be reproduced.
 - Absence of a point-in-time rate record: no `ExchangeRate` / `fx_quote` entity carrying (base, quote, rate, provider, valid_at), as JSR 354 models it.
 
 **Why it breaks**
@@ -56,6 +71,26 @@ An FX rate is only meaningful together with when it was observed and where it ca
 **Fix**
 
 Persist the conversion as an immutable fact at the moment it happens: store the rate value used, the provider or source identifier, and the as-of timestamp (or rate date) next to the amounts, and never recompute historical conversions from a live rate. Model rates as append-only, point-in-time records (base, quote, rate, source, valid_at) rather than a mutable current-rate cell, mirroring JSR 354's ExchangeRate (which carries provider and validity) and Stripe's stored `exchange_rate` plus `created`. Reports and re-renders read the captured rate off the row; only new events look up a fresh rate. This makes every conversion reproducible and auditable and satisfies IAS 21's rate-at-transaction-date requirement.
+
+```python
+# Python: the rate is a first-class stored fact, not a lookup at read time.
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from decimal import Decimal
+
+@dataclass(frozen=True)
+class FxQuote:
+    pair: str            # "USD/EUR"
+    rate: Decimal        # built from a string, never a float literal
+    source: str          # "ECB", "openexchangerates", ...
+    as_of: datetime      # aware, stored as UTC
+
+quote = FxQuote("USD/EUR", Decimal("0.9231"), "ECB",
+                datetime.now(timezone.utc))
+booking.amount_eur = (booking.amount_usd * quote.rate).quantize(Decimal("0.01"))
+booking.fx_rate, booking.fx_rate_source, booking.fx_rate_as_of = (
+    quote.rate, quote.source, quote.as_of)   # captured on the row; reports read this, never a live rate
+```
 
 **False positives**
 
@@ -80,6 +115,7 @@ Persist the conversion as an immutable fact at the moment it happens: store the 
 
 - A row holds only a reporting-currency figure: `amount_usd DECIMAL` (or a bare `amount` in a single house currency) with no `original_amount` / `original_currency` / `source_currency` columns.
 - Ingestion that converts on write and discards the input: `row.amount = convert(payload.amount, payload.currency, BASE)` then only `row.amount` is persisted; the payload currency and amount are dropped.
+- Python: an ORM model / `dataclass` / `TypedDict` with only `amount_usd` (or a bare `amount`) and no `original_amount` / `original_currency` field; an ingest function that does `row.amount = convert(payload["amount"], payload["currency"], BASE)` and drops `payload["currency"]`; a refund path that reconverts the stored base amount back to the customer currency instead of reading a retained original.
 - A `currency` column that is constant (always 'USD') across a table that clearly handles foreign payments, indicating conversion happened before storage.
 - Re-conversion performed from the stored converted value back to a foreign currency for display or refund (converted -> foreign), stacking a second rounding on an already-rounded number instead of using the retained original.
 - Refund, chargeback, or reversal logic that recomputes the original charge amount via FX instead of reading a stored original amount.
@@ -92,6 +128,23 @@ Conversion is lossy and one-way, so once you keep only the converted number you 
 **Fix**
 
 Store money as (amount, currency) in the transaction's own currency as the source of truth, and treat any converted or reporting figure as a derived, additional column, never a replacement. Persist `original_amount` plus `original_currency` alongside `converted_amount`, `converted_currency`, and the rate and timestamp (FX-2), so every conversion is reproducible and reversible without recomputing. For refunds, reversals, and re-display, read the stored original rather than reconverting a converted value. This is the shape used by Stripe (presentment amount and currency plus settled amount and `exchange_rate`) and by ledger systems that require each entry to carry its own currency (Modern Treasury: a ledger account is denominated in one ISO 4217 currency and amounts are recorded in that currency's smallest unit).
+
+```python
+# Python: the transaction currency is the source of truth; the base figure is derived.
+from dataclasses import dataclass
+from decimal import Decimal
+
+@dataclass
+class Booking:
+    original_amount: Decimal
+    original_currency: str        # what the customer was actually charged
+    converted_amount: Decimal     # derived, additional, never a replacement
+    converted_currency: str       # "USD"
+    fx_rate: Decimal              # + fx_rate_source, fx_rate_as_of (FX-2)
+
+def refund(b: Booking) -> tuple[Decimal, str]:
+    return b.original_amount, b.original_currency   # read the retained original, never reconvert
+```
 
 **False positives**
 
@@ -116,6 +169,7 @@ Store money as (amount, currency) in the transaction's own currency as the sourc
 - Aggregations grouped by anything but currency: `SELECT SUM(amount) FROM payments` with no `GROUP BY currency`, or a portfolio total that adds all rows regardless of currency.
 - Comparisons or branches on raw amounts across currencies: `if (invoice.amount > threshold)` or `Math.max(a.amount, b.amount)` where a and b differ in currency.
 - A Money/Amount type whose add, subtract, or compareTo does not assert equal currency, or code that reaches into `.amount` / `.value` and does math outside the type's guard.
+- Python: `sum(t.amount for t in txns)` or `total += t.amount` over a mix of currencies where `amount` is a bare `Decimal` / `float`; `df.groupby("customer")["amount"].sum()` (or a `.sum()` with no `groupby("currency")`) on a mixed-currency frame; `max(a.amount, b.amount)` / `a.amount > threshold` comparing across currencies; a `Money` dataclass whose `__add__` / `__lt__` does not check `self.currency == other.currency` and raise, so `+` silently mixes.
 - Concatenation of amounts from mixed-currency collections into one accumulator, wallet balance, or cart total without a per-currency bucket.
 - Absence of a currency-mismatch guard analogous to JSR 354 (MonetaryException on unequal currency) or of per-currency balancing (debits must equal credits within each currency).
 
@@ -126,6 +180,28 @@ With primitive numeric types, adding USD to EUR type-checks and runs, producing 
 **Fix**
 
 Represent money as a Money type that carries amount plus ISO 4217 currency and forbids cross-currency arithmetic: add, subtract, and compare must throw on unequal currency (JSR 354 raises MonetaryException; enforce the same in TypeScript, Go, or Ruby via a guarded value object). Mixing currencies must be an explicit conversion step (with a captured rate and timestamp, FX-2), never an implicit `+`. Aggregate per currency: keep separate totals or `GROUP BY currency`, and in ledgers require debits to equal credits within each currency (the Modern Treasury guarantee) rather than summing across. Include the minor-unit exponent in the type so zero-decimal currencies are not silently treated as cents.
+
+```python
+# Python: a guarded value object refuses cross-currency arithmetic; aggregate per currency.
+from dataclasses import dataclass
+from decimal import Decimal
+
+@dataclass(frozen=True)
+class Money:
+    amount: Decimal
+    currency: str        # ISO 4217
+
+    def __add__(self, other: "Money") -> "Money":
+        if self.currency != other.currency:
+            raise ValueError(f"cannot add {self.currency} to {other.currency}")
+        return Money(self.amount + other.amount, self.currency)
+
+def total_by_currency(txns: list[Money]) -> dict[str, Decimal]:
+    buckets: dict[str, Decimal] = {}
+    for m in txns:                       # never sum across currencies into one number
+        buckets[m.currency] = buckets.get(m.currency, Decimal("0")) + m.amount
+    return buckets
+```
 
 **False positives**
 

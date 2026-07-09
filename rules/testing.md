@@ -11,6 +11,7 @@ Part of the [fintech-roast](../README.md) rulebook. See [README.md](README.md) f
 - A money/allocation/currency-conversion module (functions named like split, allocate, distribute, prorate, convert, exchange, applyDiscount, computeTax) whose entire test file is a flat list of assertEqual / expect(...).toBe(...) on literal amounts, with no generator in sight.
 - No property-based-testing dependency or import anywhere: no `import fc from 'fast-check'` / `fc.assert(fc.property(...))` (JS/TS), no `from hypothesis import given, strategies as st` / `@given(...)` (Python), no `net.jqwik` (Java), no `gopter` / `testing/quick` (Go), no `rantly` / `propcheck` (Ruby).
 - A split or allocation function tested only for the exact-division case (splitting 100 by [1,1] into [50,50]) and never asserting the conservation invariant sum(parts) == total across arbitrary totals and ratios.
+- Python: a `pytest` money module whose `@pytest.fixture` values and `@pytest.mark.parametrize` cases are all hand-picked round literals on one currency, with no `@given` / `st.decimals(...)` generator anywhere, so the conservation invariant is only ever spot-checked, never generated against.
 - Currency conversion tested one direction only (USD to EUR) with a single rate, no round-trip test, and no bound on the round-trip residual (e.g. abs(to_usd(to_eur(x)) - x) <= tolerance).
 - A ledger/balance type with an implied invariant (balance never negative, debits == credits, running balance == sum of entries) that has no test generating random operation sequences and re-checking the invariant after each.
 - A comment or docstring stating an invariant ("total is always preserved", "balance can never go below zero") with no executable test that generates inputs to try to violate it.
@@ -28,6 +29,18 @@ fc.assert(fc.property(fc.integer(), fc.array(fc.nat()), (total, ratios) => {
   const parts = allocate(total, ratios);
   return parts.reduce((a, b) => a + b, 0) === total;
 }));
+```
+
+```python
+# Python (Hypothesis): generate arbitrary totals and ratio vectors and assert the
+# conservation invariant directly, so no evenly-dividing fixture can hide a leak.
+from hypothesis import given, strategies as st
+
+@given(st.integers(min_value=0, max_value=10**12),
+       st.lists(st.integers(min_value=1, max_value=1000), min_size=1, max_size=10))
+def test_allocation_conserves_total(total_cents, weights):
+    parts = allocate(total_cents, weights)     # integer minor units
+    assert sum(parts) == total_cents           # strict equality, no lucky fixture passes a leaky split
 ```
 
 **False positives**
@@ -56,6 +69,7 @@ fc.assert(fc.property(fc.integer(), fc.array(fc.nat()), (total, ratios) => {
 - A `.toFixed(2)` / `round(x, 2)` / `Math.round` / `BigDecimal.setScale` / `decimal.quantize` call under test, exercised only with inputs that land exactly on a cent boundary (no .xx5 tie cases, no repeating decimals like 1/3).
 - Percentage or split math tested only with divisors that divide the amount evenly (split 100 into 4, take 10% of 200) and never with amounts that do not (split 100 into 3, take 8.25% of 12.99).
 - No test that pins the intended tie-breaking rule at all: no fixture at a half-cent boundary to lock round-half-even vs round-half-up.
+- Python: a `round(x, 2)` or `Decimal.quantize(...)` under test whose fixtures never include a `.xx5` tie or a repeating decimal, so the suite passes identically under the module default (ROUND_HALF_EVEN) and ROUND_HALF_UP and can never catch a mode mismatch.
 - Interest/APR/VAT tests using headline percentages (5%, 20%) on headline principals, never realistic amounts (a 19.99 line at 8.375% sales tax).
 
 **Why it breaks**
@@ -94,6 +108,7 @@ assert tax == Decimal("1.67")  # swap the mode and this assertion changes
 
 - Every money test uses a two-decimal currency (USD/EUR/GBP) and the code hardcodes 2 decimal places (`.toFixed(2)`, `round(x, 2)`, `* 100`, `/ 100`, `setScale(2)`), with no test exercising a zero-decimal currency (JPY, KRW, VND) or a three-decimal currency (BHD, KWD, OMR, TND).
 - A minor-unit conversion (`amount * 100`, `cents / 100`) applied uniformly regardless of currency, and no test asserting that JPY 500 is 500 minor units (not 50000) or that BHD 5 is 5000 minor units (not 500).
+- Python: a `@pytest.mark.parametrize` money suite that only ever passes `"USD"` (or another 2-decimal code), so a hardcoded `* 100` is never exercised against JPY (0 decimals) or BHD (3 decimals); a fixture set with no negative/refund `Decimal("-19.99")` case despite a refund/credit path in the code.
 - No test with a negative amount, refund, chargeback, credit note, or reversal, despite the codebase having refund/credit/void paths.
 - No boundary-magnitude test: nothing near zero (0, the smallest minor unit, 0.001 for a 3-decimal currency), nothing large enough to probe the numeric type's limits (values near Int32/Int64/Number.MAX_SAFE_INTEGER, or a NUMERIC/DECIMAL column's declared precision).
 - Money stored or computed as a floating-point type (SQL FLOAT/REAL/DOUBLE, JS number) with tests only in the small-magnitude range where float error is invisible.
@@ -106,6 +121,25 @@ Money behavior is not uniform across currencies or magnitudes, so a suite that o
 **Fix**
 
 Parameterize the money tests over a currency matrix, not a single currency: include at least one zero-decimal (JPY), one two-decimal (USD), and one three-decimal (BHD or KWD), and assert the correct minor-unit scaling for each rather than a hardcoded factor of 100. Drive the exponent from an ISO 4217 lookup so adding a currency does not silently reuse * 100. Add negative-amount cases for every refund/credit/reversal path and assert sign and rounding behavior there. Apply boundary value analysis to magnitude: test 0, the smallest minor unit, a value at the numeric type's or DECIMAL column's declared limit, and just beyond it to confirm the failure mode is rejection, not silent overflow or precision loss. Store money as integer minor units or a fixed-precision DECIMAL/NUMERIC, never binary float, so the large-magnitude tests stay exact.
+
+```python
+# Python (pytest): parametrize over the currency matrix and drive the exponent
+# from an ISO 4217 lookup, so a hardcoded *100 fails on JPY and BHD. Cover a refund.
+import pytest
+from decimal import Decimal
+
+EXPONENT = {"JPY": 0, "USD": 2, "BHD": 3}      # ISO 4217 minor-unit digits
+
+@pytest.mark.parametrize("currency, amount, expected_minor", [
+    ("JPY", Decimal("500"),    500),           # 0 decimals: 500, not 50000
+    ("USD", Decimal("5.00"),   500),           # 2 decimals
+    ("BHD", Decimal("5.000"),  5000),          # 3 decimals: 5000, not 500
+    ("USD", Decimal("-19.99"), -1999),         # refund keeps its sign
+])
+def test_to_minor_units(currency, amount, expected_minor):
+    assert to_minor_units(amount, currency) == expected_minor
+    assert to_minor_units(amount, currency) == int(amount * (10 ** EXPONENT[currency]))
+```
 
 **False positives**
 

@@ -9,6 +9,7 @@ Part of the [fintech-roast](../README.md) rulebook. See [README.md](README.md) f
 **What to detect**
 
 - A webhook/callback HTTP route (Express/Fastify/Flask/Django/Rails/Spring controller) that runs a money side effect (capture, refund, credit balance, fulfill order, send payout) directly in the handler body with no lookup of an already-processed marker first.
+- Python: a Flask/FastAPI/Django webhook route (`@app.route('/webhooks', methods=['POST'])`, `@app.post(...)`, a `def stripe_webhook(request)` view) that calls `stripe.PaymentIntent.capture(...)`, credits a balance, or enqueues fulfillment straight from the parsed `event['data']['object']` with no prior `select(...).where(ProcessedEvent.event_id == event['id'])` (SQLAlchemy) or `ProcessedEvent.objects.filter(event_id=...).exists()` (Django) guard.
 - No table or store keyed on the provider event id (Stripe `event.id` / `evt_...`, Adyen `pspReference` plus `eventCode`, PayPal `id`) that is consulted before the side effect. Grep for the handler reading `event.type`/`eventCode`/`resource.type` but never SELECTing or INSERTing an `event_id`/`webhook_id` dedup row.
 - Handler logic assumes ordering: `if event.type == 'x' then set status = ...` overwriting later state, or code that treats `payment_intent.succeeded` as final without guarding against a later `.canceled`/`.refunded` arriving first or twice.
 - Dedup check and side effect not in one transaction: an `INSERT INTO processed_events` (or Redis `SETNX`) committed separately from, or after, the charge/DB mutation, so a crash between them re-runs the effect.
@@ -22,6 +23,24 @@ Payment providers deliver webhook events at-least-once and out of order, not exa
 **Fix**
 
 Record the provider's event id and dedupe on it before any side effect, inside the same database transaction as the effect. On receipt, `INSERT INTO processed_events(event_id) VALUES ($1)` guarded by a unique constraint (or Redis `SET key NX`); if the insert reports the id already exists, ack 200 and stop. Only if the insert is new do you run the mutation, and commit the marker and the mutation together so a crash cannot leave one without the other (this is IDE-4 backing IDE-1). For ordering, key state transitions on the object id plus a monotonic field (status precedence, `created`, sequence) and ignore an event that would move state backward rather than trusting arrival order. Always return 2xx once you have durably accepted the event so the provider stops retrying.
+
+```python
+# Python (SQLAlchemy): insert the marker and run the effect in ONE transaction.
+# processed_events.event_id carries a UNIQUE constraint (IDE-4 backstop).
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+def handle_webhook(event):
+    with Session(engine) as session, session.begin():
+        result = session.execute(
+            pg_insert(ProcessedEvent)
+            .values(event_id=event["id"])
+            .on_conflict_do_nothing(index_elements=["event_id"])
+        )
+        if result.rowcount == 0:  # id already present: already processed, ack and stop
+            return ("", 200)
+        apply_money_side_effect(session, event)  # commits atomically with the marker
+    return ("", 200)
+```
 
 **False positives**
 
@@ -43,6 +62,7 @@ Record the provider's event id and dedupe on it before any side effect, inside t
 **What to detect**
 
 - A POST to a payment provider that moves money (`stripe.charges/paymentIntents/refunds/transfers/payouts.create`, `adyen /payments`, PayPal capture, a bank/ACH transfer call) with no idempotency key in the request options or headers. Grep for `.create(` / `POST /payments` without an adjacent `idempotencyKey` / `Idempotency-Key` / `idempotency-key`.
+- Python: `stripe.PaymentIntent.create(...)` / `stripe.Refund.create(...)` / `stripe.Transfer.create(...)` with no `idempotency_key=` argument, or a raw `requests.post(url, json=...)` / `httpx.post(...)` to a money endpoint with no `Idempotency-Key` header. A `@retry` from `tenacity` (or a manual `for attempt in range(...)` loop) wrapping such a call so it resends on timeout/5xx without a stable key threaded through.
 - A retry wrapper, `axios-retry`, `tenacity`, resilience4j, or a message-queue redelivery around a money call that resends on timeout/5xx without threading a stable key through, so each attempt is a fresh operation.
 - An idempotency key that is regenerated per attempt (`uuid4()` computed inside the retry loop or per HTTP send) instead of once per logical operation, defeating the purpose.
 - A key derived from something non-unique or time-based (`now()`, a shared cart id reused across distinct charges) so two different operations collide, or so a legitimately different second charge is silently deduped to the first.
@@ -56,6 +76,22 @@ On a timeout or dropped connection the client cannot tell whether the charge suc
 **Fix**
 
 Generate one idempotency key per logical operation, persist it with that operation before the first send, and reuse the exact same key on every retry, including retries after a process restart. Stripe recommends a V4 UUID or another random string with enough entropy to avoid collisions; pass it via the client's idempotency option (`stripe.paymentIntents.create(params, { idempotencyKey })`) or the `Idempotency-Key` header. Scope the key to the operation, not to a shared entity like a cart, so distinct charges get distinct keys and duplicates of one charge share a key. Send the same request parameters on retry, since Stripe compares parameters against the original request and errors on a mismatch. Respect provider retention (Stripe removes keys at least 24h old, Adyen keeps them a minimum of 7 days and unique to the company account): do not lean on a key older than the window, and pair the outbound key with a local unique constraint (IDE-4) so your own store is a second line of defense.
+
+```python
+# Python: mint the key ONCE per operation and persist it, then reuse it on every
+# retry (tenacity re-invokes the SAME call, so the key must be captured outside).
+key = operation.idempotency_key or str(uuid.uuid4())
+persist_key(operation.id, key)  # durable before the first send, survives a restart
+
+@retry(stop=stop_after_attempt(4), wait=wait_exponential())
+def charge():
+    # same key + same params every attempt: Stripe replays the first result
+    return stripe.PaymentIntent.create(
+        amount=amount, currency="usd", customer=cust,
+        idempotency_key=key,
+    )
+# raw HTTP equivalent: requests.post(url, json=body, headers={"Idempotency-Key": key})
+```
 
 **False positives**
 
@@ -79,6 +115,7 @@ Generate one idempotency key per logical operation, persist it with that operati
 
 - A SELECT of a balance/quantity/counter into an application variable, arithmetic in code, then a separate UPDATE writing the computed value back: `SELECT balance ... ; balance = balance - amount; UPDATE ... SET balance = <computedValue>`. The write sets an absolute value derived from a stale read rather than `balance = balance - amount`.
 - ORM read-modify-save on a money field: `row = repo.find(id); row.balance -= amt; repo.save(row)` (ActiveRecord, Sequelize, Django `obj.save()`, Hibernate dirty-checking, GORM `Save`) with no row lock and no version column.
+- Python: a SQLAlchemy `acct = session.get(Account, id); acct.balance -= amt; session.commit()`, or Django `acct = Account.objects.get(pk=id); acct.balance -= amt; acct.save()`, with no `select(...).with_for_update()` / `select_for_update()` on the read and no `F()` expression on the write, so two workers overwrite each other. A Django `select_for_update()` used OUTSIDE a `transaction.atomic()` block (it silently takes no lock and raises `TransactionManagementError` on some setups). A check-then-act `if acct.balance >= amt:` in Python between the ORM read and save, with no `WHERE balance >= amt` guard.
 - A check-then-act on available funds split across statements: `SELECT balance` then `if (balance >= amount)` in code then `UPDATE`, with no `FOR UPDATE` on the read and no `WHERE balance >= amount` guard on the write, allowing an overdraft under concurrency.
 - The read that feeds the decision lacks `SELECT ... FOR UPDATE` / `SELECT ... FOR NO KEY UPDATE`, and the transaction runs at READ COMMITTED (the default), so two concurrent transactions both read the same starting value.
 - No optimistic-concurrency guard: an UPDATE with no `WHERE version = :expected` (and no check that exactly one row was affected) on a table whose balance is mutated concurrently.
@@ -91,6 +128,26 @@ Under concurrency, two transactions that each SELECT the balance, compute in app
 **Fix**
 
 Do the arithmetic in the database in one statement: `UPDATE accounts SET balance = balance - :amt WHERE id = :id AND balance >= :amt` and treat zero rows affected as insufficient funds, which makes the funds check and the debit a single atomic act. When the decision genuinely needs a prior read (multi-row logic), take an explicit row lock first with `SELECT ... FOR UPDATE`, which per PostgreSQL "prevents them from being locked, modified or deleted by other transactions until the current transaction ends," then update within the same transaction. Alternatively use optimistic concurrency: add a `version` column, write `... WHERE id = :id AND version = :v` bumping the version, and retry on zero rows affected. For counters in a cache use native atomics (`INCRBY`/`DECRBY`) rather than GET-then-SET. Never round-trip a money value into application memory to mutate it.
+
+```python
+# Python (Django): one atomic UPDATE, funds check folded into the WHERE via F().
+# rows == 0 means the guard failed (insufficient funds), no overdraft possible.
+from django.db.models import F
+rows = (Account.objects
+        .filter(pk=acct_id, balance__gte=amt)
+        .update(balance=F("balance") - amt))
+if rows == 0:
+    raise InsufficientFunds()
+
+# Python (SQLAlchemy): when a prior read is genuinely needed, lock the row first.
+with Session(engine) as session, session.begin():
+    acct = session.execute(
+        select(Account).where(Account.id == acct_id).with_for_update()
+    ).scalar_one()
+    if acct.balance < amt:
+        raise InsufficientFunds()
+    acct.balance -= amt  # safe: the row is locked for this transaction
+```
 
 **False positives**
 
@@ -112,6 +169,7 @@ Do the arithmetic in the database in one statement: `UPDATE accounts SET balance
 
 - A table storing a provider identifier (`event_id`, `payment_intent_id`, `charge_id`, `psp_reference`, `idempotency_key`, `external_ref`, `transaction_id`) whose DDL has no `UNIQUE` constraint or unique index on that column. Grep the schema/migrations for the column present but no `UNIQUE`/`CREATE UNIQUE INDEX`/`ADD CONSTRAINT ... UNIQUE`.
 - Dedup enforced only in application code: `SELECT ... WHERE event_id = ?` followed by a conditional `INSERT`, with nothing at the DB level, so two concurrent requests both see no row and both insert (a check-then-insert TOCTOU).
+- Python: a SQLAlchemy `Column("event_id", String)` or a Django `event_id = models.CharField(...)` with no `unique=True` / `UniqueConstraint`, backing a `if not session.query(...).filter_by(event_id=...).first(): session.add(...)` (or Django `if not ...objects.filter(event_id=...).exists():`) check-then-insert that races under concurrency.
 - Nullable external-reference column used for dedup: `event_id TEXT` without `NOT NULL`, allowing multiple NULLs that a unique index does not collapse.
 - Inserts of provider records with no `ON CONFLICT` / `INSERT IGNORE` / `MERGE` and no handling of a unique-violation error (e.g. Postgres SQLSTATE 23505), implying duplicates are simply not caught if the app-level check races.
 - Wrong uniqueness grain: a unique key on only part of the natural identity (e.g. `pspReference` alone when Adyen dedup requires `pspReference` plus `eventCode`, or a single global key that should be scoped per account as in `(user_id, idempotency_key)`).
@@ -123,7 +181,7 @@ Application-level dedup checks are a check-then-act that races: two concurrent d
 
 **Fix**
 
-Put a `UNIQUE NOT NULL` constraint on the external reference at its correct grain and let the database be the final arbiter: `event_id TEXT NOT NULL UNIQUE`, or for scoped keys a composite `UNIQUE (account_id, idempotency_key)` (Brandur uses `(user_id, idempotency_key)` so a key is unique per account), or `UNIQUE (psp_reference, event_code)` for Adyen. Match the grain to the provider's own duplicate definition. Then insert with `INSERT ... ON CONFLICT (event_id) DO NOTHING` (which PostgreSQL documents as simply avoiding the insert as its alternative action) and treat a zero-row / conflict result as "already processed, skip the side effect." This makes the constraint the last line of defense behind the application check (IDE-1) and the outbound idempotency key (IDE-2): even if both of those miss, the database physically cannot store the duplicate.
+Put a `UNIQUE NOT NULL` constraint on the external reference at its correct grain and let the database be the final arbiter: `event_id TEXT NOT NULL UNIQUE`, or for scoped keys a composite `UNIQUE (account_id, idempotency_key)` (Brandur uses `(user_id, idempotency_key)` so a key is unique per account), or `UNIQUE (psp_reference, event_code)` for Adyen. Match the grain to the provider's own duplicate definition. Then insert with `INSERT ... ON CONFLICT (event_id) DO NOTHING` (which PostgreSQL documents as simply avoiding the insert as its alternative action) and treat a zero-row / conflict result as "already processed, skip the side effect." This makes the constraint the last line of defense behind the application check (IDE-1) and the outbound idempotency key (IDE-2): even if both of those miss, the database physically cannot store the duplicate. In Python, declare the constraint on the model itself (SQLAlchemy `Column("event_id", String, nullable=False, unique=True)` or `UniqueConstraint("account_id", "idempotency_key")`; Django `models.UniqueConstraint(fields=["account_id", "idempotency_key"], name=...)`) and let the driver surface the conflict via `on_conflict_do_nothing()` rather than catching `IntegrityError` after the fact.
 
 **False positives**
 

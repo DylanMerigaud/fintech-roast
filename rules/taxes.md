@@ -12,6 +12,7 @@ Part of the [fintech-roast](../README.md) rulebook. See [README.md](README.md) f
 - SQL or ORM aggregates like SUM(ROUND(line_qty*unit_price*rate, 2)) used as the invoice tax, with no single documented rounding policy, or a per-line ROUND(...) column that is later re-summed AND separately re-derived from a total.
 - Rounding inside a per-line loop (round(line.net * rate) accumulated) with no configuration flag choosing line-level vs document-level, so the level is accidental rather than a decision.
 - A rounding helper called at both line granularity and total granularity on the same tax with different inputs (round(sum(x)) vs sum(round(x))), especially across service boundaries (invoicing service vs tax service vs accounting export).
+- Python: `sum(round(line.net * rate, 2) for line in lines)` (per-line rounding then summed) in one path while another does `round(sum(l.net for l in lines) * rate, 2)` (round the document total), or a `.quantize(Decimal("0.01"))` inside the per-line comprehension with no flag choosing the level.
 - Storing only a rounded per-line tax and reconstructing the document tax from it (or vice versa) instead of persisting both the chosen level's authoritative figure and the method used.
 - Multi-jurisdiction tax where lines with different rates are summed into one pre-rounded pool, ignoring that the permitted level may be per-rate or per-jurisdiction.
 
@@ -26,6 +27,21 @@ Pick one rounding level per tax rate and per jurisdiction, make it an explicit c
 ```
 tax = roundTax(amount_minor_units, rate, level)   // one helper, every path
 assert sum(line_tax_minor) == document_tax_minor  // reconcile under the declared level
+```
+
+```python
+# Python: one helper, the level is an explicit argument, every path calls it the same way.
+from decimal import Decimal, ROUND_HALF_UP
+
+def invoice_tax(lines, rate: Decimal, level: str) -> Decimal:
+    cent = Decimal("0.01")
+    if level == "line":       # round each line, then sum the rounded parts
+        return sum(((l.net * rate).quantize(cent, rounding=ROUND_HALF_UP) for l in lines),
+                   start=Decimal("0"))
+    if level == "document":   # sum the nets, round the document total once
+        subtotal = sum((l.net for l in lines), start=Decimal("0"))
+        return (subtotal * rate).quantize(cent, rounding=ROUND_HALF_UP)
+    raise ValueError(level)
 ```
 
 **False positives**
@@ -52,6 +68,7 @@ assert sum(line_tax_minor) == document_tax_minor  // reconcile under the declare
 - A price stored without an inclusive or exclusive marker (a bare amount column with no tax_behavior, inclusive boolean, or price_includes_tax field), so the same number is treated as net in one path and gross in another.
 - Displaying an inclusive price to the buyer while the charge or settlement path treats the same figure as exclusive and adds tax on top (or the reverse), changing what the customer actually pays.
 - Rounding the back-calculated tax and the back-calculated net independently so that net + tax != gross, breaking the invariant that an inclusive line must reconcile to the displayed gross.
+- Python: `net = gross - gross * rate` (wrong back-out) instead of `net = gross / (1 + rate)`, or rounding both pieces separately (`net = round(gross / (1 + rate), 2); tax = round(gross * rate / (1 + rate), 2)`) so `net + tax != gross`; a bare amount with no `tax_behavior`/`inclusive` field guiding which branch runs.
 - Mixing per-region behavior in one code path (US sales tax is exclusive, EU VAT and many GST regimes are commonly inclusive for B2C) without branching on the jurisdiction's expected behavior.
 
 **Why it breaks**
@@ -61,6 +78,21 @@ Exclusive tax is added on top of the listed price, so the final price the buyer 
 **Fix**
 
 Store tax behavior explicitly next to every price (an inclusive boolean or a tax_behavior enum), and branch on it: exclusive means tax = round(net * rate) and total = net + tax; inclusive means net = round(gross / (1 + rate)) and tax = gross - net so the pieces always re-sum to the displayed gross. Never subtract rate*gross to get net. Do the arithmetic on integer minor units with a decimal or basis-point rate, and derive the second component from the first (net then tax, or gross then net) rather than rounding both independently, so net + tax == gross by construction. Keep display and settlement on the same behavior for a given line, and pick the jurisdiction-appropriate default (US sales tax exclusive, EU VAT and B2C GST usually inclusive) rather than a global constant.
+
+```python
+# Python: branch on the stored behavior; derive the second piece so net + tax == gross.
+from decimal import Decimal, ROUND_HALF_UP
+cent = Decimal("0.01")
+
+def split(amount: Decimal, rate: Decimal, inclusive: bool):
+    if inclusive:
+        net = (amount / (1 + rate)).quantize(cent, rounding=ROUND_HALF_UP)
+        tax = amount - net            # derived, so net + tax == gross exactly
+    else:
+        tax = (amount * rate).quantize(cent, rounding=ROUND_HALF_UP)
+        net = amount                  # exclusive: total = net + tax
+    return net, tax
+```
 
 **False positives**
 
@@ -94,6 +126,18 @@ Tax rates are exact decimal quantities but common values like 0.1 (10%) and 0.08
 **Fix**
 
 Represent rates as exact decimals or integer basis points (825 for 8.25%) and do the arithmetic in a decimal type or in integer minor units, never in float or double. In Python use decimal.Decimal built from a string or int (Decimal('0.0825'), not Decimal(0.0825)); in Java use BigDecimal via the String constructor (new BigDecimal("0.1"), never new BigDecimal(0.1)); in SQL use NUMERIC or DECIMAL columns and keep money out of FLOAT and DOUBLE. A robust pattern is tax_minor = round(amount_minor * bps, half-even) / 10000 with all inputs integers and a single explicit rounding mode, so the computation is exact up to the one intended rounding step. Never test money for equality on floats; compare exact decimals or integers.
+
+```python
+# Python: rate as integer basis points, amount as integer minor units, one explicit rounding.
+from decimal import Decimal, ROUND_HALF_UP
+
+BPS = 825                     # 8.25%, exact integer, not the float 0.0825
+amount_minor = 19999          # 199.99 as integer cents
+tax_minor = int((Decimal(amount_minor) * BPS / Decimal(10000)).quantize(
+                Decimal("1"), rounding=ROUND_HALF_UP))     # 1650 cents
+# if you keep a Decimal rate, build it from a string, never from a float:
+rate = Decimal("0.0825")      # not Decimal(0.0825), which is 0.082500000000000004...
+```
 
 **False positives**
 

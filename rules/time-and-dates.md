@@ -28,6 +28,16 @@ SELECT date_trunc('month', ts AT TIME ZONE 'America/New_York') AS period
 FROM ledger_entries;
 ```
 
+```python
+# Python: capture the instant as aware-UTC, derive the period in the account's business zone.
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+
+now = datetime.now(timezone.utc)                 # aware instant, never datetime.now() (naive, server-local)
+biz_zone = ZoneInfo(account.business_zone)       # e.g. "America/New_York", data on the account
+period = now.astimezone(biz_zone).strftime("%Y-%m")   # the statement month is a wall-clock concept
+```
+
 **False positives**
 
 - The whole system is genuinely single-zone by design (one jurisdiction, one exchange, one accounting calendar) and that zone is pinned explicitly and enforced, not inherited from the host locale.
@@ -40,6 +50,7 @@ FROM ledger_entries;
 2. [Don't Do This: Don't use timestamp (without time zone)](https://wiki.postgresql.org/wiki/Don't_Do_This) (PostgreSQL wiki)
 3. [Date - JavaScript | MDN](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date) (Mozilla MDN Web Docs)
 4. [Noda Time: Core concepts](https://nodatime.org/2.4.x/userguide/concepts) (Noda Time, Jon Skeet et al.)
+5. [datetime, Basic date and time types](https://docs.python.org/3/library/datetime.html) (Python Software Foundation)
 
 ## TIM-2: DST-naive day arithmetic (86400 s per day, epoch-ms division)
 
@@ -49,6 +60,7 @@ FROM ledger_entries;
 
 - Literal day math: `* 86400`, `* 86400000`, `86_400`, `* 24 * 60 * 60`, `1000*60*60*24`, or dividing an epoch-millis / seconds difference by one of these to get "days between".
 - `Date.now()` / `getTime()` subtraction converted to days; Python `(a-b).total_seconds()/86400`; Java `Instant` / epoch millis diff divided by 86400000 instead of `ChronoUnit.DAYS.between` on zoned values.
+- Python: `dt + timedelta(days=1)` on an aware datetime used to mean "next calendar day" (a `timedelta` is a fixed 86400 s duration, so it lands on the wrong wall-clock hour across a DST transition), or `timedelta(days=n)` added to iterate accrual days in a DST zone; `(a - b).days` / `(a - b).total_seconds() / 86400` on aware datetimes to count calendar days between them instead of `(a.date() - b.date()).days`.
 - Adding a calendar amount by adding a fixed `Duration`: Noda Time `Duration.FromDays` / `Plus(Duration...)` on a `ZonedDateTime`, java.time `Instant.plus(Duration.ofDays(n))` where a `Period` / `plusDays` on a `ZonedDateTime` was meant, Go `t.Add(24*time.Hour)` used to mean "next day".
 - Daily accrual / interest or usage-metering loops that assume every day contributes exactly 1/365 (or a fixed second-count), computed over local days in a DST zone.
 - Any accumulation of a fixed increment over a long uptime without periodic resync (fixed-point or float tick counters that drift); grep for hand-rolled `seconds += 0.1`-style timers.
@@ -60,6 +72,18 @@ In every zone that observes DST, one day per year is 23 hours long and one is 25
 **Fix**
 
 Separate timeline arithmetic (`Duration`, fixed seconds) from calendar arithmetic (`Period`, days / months) and use the calendar kind for anything a human calls "a day". Count days with calendar-aware APIs on zoned or local dates: `ChronoUnit.DAYS.between(d1,d2)`, `LocalDate` differences, Noda Time `Period.Between`, Python `(d1.date()-d2.date()).days`, never an epoch-difference divide. To add days across a DST boundary, add a `Period` / `plusDays` on a `ZonedDateTime` (or convert to `LocalDate`, add, reconvert once, resolving ambiguous / skipped times deliberately), not a `Duration`. For daily accruals, iterate calendar days and apply the contractual per-day factor rather than pro-rating by seconds. For long-running counters, resync against a monotonic authoritative clock instead of summing a fixed tick.
+
+```python
+# Python: count and add days on calendar dates, not by dividing or adding a fixed 86400 s.
+from datetime import date, timedelta
+
+days_overdue = (date.today() - invoice.due_date).days   # date arithmetic is DST-immune, unlike total_seconds()/86400
+
+# "Next calendar day" is a date step, applied to the local date, not dt + timedelta(days=1) on an aware datetime.
+next_day = local_date + timedelta(days=1)                # safe: `date` has no clock, so no DST hour to shift
+for accrual_day in (invoice.start + timedelta(days=n) for n in range((invoice.end - invoice.start).days)):
+    balance += principal * daily_rate                    # iterate calendar days, do not pro-rate by seconds
+```
 
 **False positives**
 
@@ -101,6 +125,20 @@ WHERE ts >= period_start AND ts < next_period_start
 -- target_day = min(anchor_day, days_in_month(y, m))
 ```
 
+```python
+# Python: half-open period test, and month rollover that clamps instead of overflowing.
+import calendar
+from dateutil.relativedelta import relativedelta
+
+in_period = period_start <= ts < next_period_start   # [start, next_start), never BETWEEN (inclusive both ends)
+
+# relativedelta clamps Jan 31 + 1 month to Feb 28/29 rather than overflowing to Mar 3.
+next_start = period_start + relativedelta(months=1)
+# Anchor logic without dateutil: clamp the stored day_of_month to the target month's length.
+last_day = calendar.monthrange(year, month)[1]       # 28/29/30/31
+anchor = date(year, month, min(day_of_month, last_day))
+```
+
 **False positives**
 
 - `BETWEEN` (or a closed interval) on a whole-day date-only column where the next period starts on a strictly later day and boundaries cannot collide, so inclusivity is unambiguous.
@@ -119,6 +157,7 @@ WHERE ts >= period_start AND ts < next_period_start
 **What to detect**
 
 - Interest computed as `principal * rate * days / 365` (or `/360`, or `/365.25`) with the denominator and day-count rule baked in as a literal instead of read from the instrument / contract.
+- Python: `principal * rate * (end - start).days / 365` (or `/ 360`) with the divisor hardcoded and `(end - start).days` (a bare actual day count) fed to it regardless of the instrument's convention; a module-level `DAYS_IN_YEAR = 365`; no `DayCount` enum / `convention` field on the loan model, so two instruments on different bases cannot be represented.
 - A single `daysBetween` used for accrual with no notion of a convention parameter; grep for `/ 360`, `/ 365`, `* rate *` near a day difference, and for a hardcoded `DAYS_IN_YEAR`.
 - Actual day counts (calendar `daysBetween`) paired with a 360 denominator, or 30/360 assumed without the ISDA day-of-month adjustments (Jan 31 / Feb-end special cases) implemented.
 - No enum / config for the convention (ACT/360, ACT/365F, ACT/ACT, 30/360, 30E/360) on the loan, bond, or swap record; the code cannot represent that two instruments accrue differently.
@@ -131,6 +170,23 @@ The day-count convention is a contractual term, not an implementation detail, an
 **Fix**
 
 Make the day-count convention an explicit attribute of each instrument (an enum like ACT_360, ACT_365F, ACT_ACT_ISDA, THIRTY_360_ISDA, THIRTY_E_360) sourced from the contract, and compute the year fraction through a convention object, not an inline divide (`accrual = notional * rate * dayCountFraction(convention, start, end)`). Prefer a vetted library (OpenGamma Strata `DayCounts`, QuantLib) over hand-rolling the 30/360 day-of-month adjustments, which are easy to get subtly wrong. Because 30/360 is not additive, compute each coupon period against its own endpoints rather than summing daily fractions, and add golden-value tests per convention (including a leap-year ACT/ACT case and a Jan 31 / Feb-end 30/360 case). Never let a default denominator stand in for the contractual basis.
+
+```python
+# Python: the convention is data on the instrument; the year fraction goes through a convention object.
+from decimal import Decimal
+from enum import Enum
+
+class DayCount(Enum):
+    ACT_360 = "ACT/360"
+    ACT_365F = "ACT/365F"
+    THIRTY_360_ISDA = "30/360 ISDA"     # among others: ACT/ACT, 30E/360
+
+def year_fraction(convention: DayCount, start, end) -> Decimal:
+    ...   # delegate to a vetted library (QuantLib / Strata); do not hand-roll the 30/360 adjustments
+
+# accrual reads the instrument's own convention, never a hardcoded /365 or /360.
+accrual = loan.notional * loan.rate * year_fraction(loan.day_count, period_start, period_end)
+```
 
 **False positives**
 

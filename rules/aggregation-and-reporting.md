@@ -9,7 +9,7 @@ Part of the [fintech-roast](../README.md) rulebook. See [README.md](README.md) f
 **What to detect**
 
 - SQL columns holding money declared REAL, FLOAT, FLOAT4, FLOAT8, or DOUBLE PRECISION, then fed to SUM() or AVG() (in PostgreSQL, sum(double precision) returns double precision, so the accumulator itself is a float).
-- A running total accumulated in a native float: JS/TS `let total = 0; for (const x of rows) total += x.amount` or `rows.reduce((a, r) => a + r.amount, 0)` where amount is a Number; Python `sum(floats)` or `+=` on floats for currency; Java `double total`; Go `var total float64`; Ruby summing Floats.
+- A running total accumulated in a native float: JS/TS `let total = 0; for (const x of rows) total += x.amount` or `rows.reduce((a, r) => a + r.amount, 0)` where amount is a Number; Python `sum(r.amount for r in rows)` or `total += x` on floats for currency, or `float(x)`/`parseFloat`-style coercion into the accumulator; Java `double total`; Go `var total float64`; Ruby summing Floats.
 - Parallel or chunked aggregation that combines per-partition float subtotals (map/reduce, Spark or pandas `.sum()`, sharded workers, DB parallel aggregate), where reordering the adds changes the last bits.
 - Money moved through a float on the way to the sum: `parseFloat` or `Number()` on an amount string, `amount * 100` in float, `Math.round` applied after float arithmetic to hide drift.
 - Reconciliation code that compares two sums with `==` or exact equality instead of a tolerance, or that occasionally reports a 0.01 imbalance.
@@ -22,6 +22,15 @@ IEEE 754 binary floating point cannot represent most decimal fractions exactly, 
 **Fix**
 
 Keep money out of binary floats end to end. Store amounts as integers in the smallest currency unit (Stripe's model: 1099 = 10.99 USD) or as fixed-precision decimals (SQL NUMERIC/DECIMAL, Java BigDecimal, Python decimal.Decimal, JS decimal.js or Prisma.Decimal), and do the SUM in that type so the accumulator never becomes a float. If a legacy float path is unavoidable for a non-authoritative figure, use compensated (Kahan) summation, whose worst-case error bound is independent of n, and never compare two sums for exact equality, use an explicit tolerance. Treat the decimal or integer total as the source of truth; a float is acceptable only for a display estimate that is never persisted or reconciled.
+
+```python
+# Python: sum in Decimal (built from strings) or in integer minor units, never in float.
+from decimal import Decimal
+
+total = sum((Decimal(r.amount_str) for r in rows), start=Decimal("0"))  # exact, associative
+# or, if amounts are stored as integer cents:
+total_cents = sum(r.amount_cents for r in rows)   # int accumulator, exact
+```
 
 **False positives**
 
@@ -48,6 +57,7 @@ Keep money out of binary floats end to end. Store amounts as integers in the sma
 - A DECIMAL/NUMERIC column that surfaces in code as a native float or double instead of a decimal type: e.g. a driver or ORM config that maps NUMERIC to JS Number, Python float, or Go float64, or Prisma's Float scalar (which maps to database Double, not Decimal, since Prisma 2.17).
 - `JSON.parse(...)` (or any JSON decode) on a payload containing a monetary amount or a large integer id, then using the result as a Number; large integer literals beyond 2^53 in JSON bodies or webhook payloads.
 - A round-trip that stringifies then re-parses money, or converts a decimal type to Number for arithmetic: `Number(row.amount)`, `.toNumber()` on a Decimal, `float(row['amount'])`, `parseFloat`, then summing or comparing.
+- Python: `json.loads(...)` on a money payload with the default float parser (large ids or high-precision amounts silently become binary64), `float(...)` on a `Decimal`/`NUMERIC` column value, or a driver/ORM (e.g. asyncpg, a `cursor` without `parse_float=Decimal`) that hands back `float` for a DECIMAL column.
 - Java/JDBC using getDouble() or getFloat() on a DECIMAL column instead of getBigDecimal(); Go scanning a NUMERIC into *float64; Ruby/ActiveRecord attributes typed as :float over a decimal column.
 - JSON serializers that emit numbers (not strings) for money or 64-bit ids, sent to a JavaScript consumer with no BigInt or decimal reviver.
 - Aggregation whose input is exact (NUMERIC) but which is cast to float mid-pipeline before SUM or AVG, defeating the exact accumulator.
@@ -59,6 +69,15 @@ The database can store an amount exactly in DECIMAL/NUMERIC, but the value passe
 **Fix**
 
 Carry money in an exact type across every boundary. Map DECIMAL/NUMERIC columns to a decimal type, not a float: use getBigDecimal in JDBC, decimal.Decimal in Python, decimal.js or Prisma.Decimal in JS (and avoid Prisma's Float scalar for money, since it maps to Double), and a fixed-precision type in Go or Ruby. Over the wire, serialize money and 64-bit ids as strings and revive them into BigInt or a decimal type (MDN's context.source pattern) rather than letting JSON.parse coerce them to doubles. Add a boundary test with a value that is exact in DECIMAL but not in binary64 (e.g. an amount ending in .10 or an id above 2^53) and assert it survives the round trip unchanged.
+
+```python
+# Python: decode JSON numbers straight into Decimal, and build money from the string form.
+import json
+from decimal import Decimal
+
+payload = json.loads(body, parse_float=Decimal, parse_int=Decimal)  # never coerced to binary64
+amount = Decimal(str(row["amount"]))   # if a driver already handed back a float, stringify first
+```
 
 **False positives**
 
@@ -85,6 +104,7 @@ Carry money in an exact type across every boundary. Map DECIMAL/NUMERIC columns 
 - LIMIT/OFFSET (or SQL Server OFFSET ... FETCH, MySQL LIMIT off,n) paging driven by a page number, with each page fetched in a separate transaction or request while the table is concurrently written.
 - Aggregation or export that loops pages and accumulates a total across them (sum, count, invoice or settlement batch, statement generation, balance rollup) rather than computing the aggregate in one query.
 - Cursor variables named `page`, `offset`, `skip` computed as `page * pageSize`; ORM calls like `.offset(n).limit(m)`, `.skip(n).take(m)`, `LIMIT n OFFSET m`, Django `qs[offset:offset+limit]` iterated to sum money.
+- Python: a loop that pages then accumulates in code, e.g. `total = Decimal("0"); for page in range(...): total += sum(Decimal(r.amount) for r in qs[page*size:(page+1)*size])`, or a Django `Sum(...)` aggregate run per page and added up, instead of one `qs.aggregate(Sum("amount"))` over the whole set in a single snapshot.
 - ORDER BY on a non-unique or mutable key (e.g. ORDER BY created_at without a unique tiebreaker), so rows with equal keys can reshuffle between page fetches.
 - Streaming or keyset pagination whose `WHERE key > :last` boundary can be crossed by updates that change the sort key mid-scan, or that runs outside a single snapshot when exactness is required.
 - A multi-page read of a financial dataset with no single-snapshot guarantee: pages served under READ COMMITTED across separate transactions, no repeatable-read or serializable snapshot and no immutable cursor key.
@@ -103,6 +123,15 @@ SELECT amount FROM txns
 WHERE (created_at, id) > (:last_ts, :last_id)
 ORDER BY created_at, id
 LIMIT :page;
+```
+
+```python
+# Python (Django): let the database aggregate in one snapshot, do not page-then-add in code.
+from django.db.models import Sum
+total = txns.filter(**criteria).aggregate(total=Sum("amount"))["total"]
+# if you must stream, hold one snapshot and page by an immutable keyset key, not OFFSET:
+with transaction.atomic():  # repeatable read / serializable so the window cannot shift
+    ...
 ```
 
 Cursors give snapshot consistency on arbitrary queries because the isolation level fixes the view at transaction start; keyset gives it for ordered records without holding a transaction open. For settlement or reporting, snapshot the working set (a stable as-of view or an append-only ledger with an immutable cursor) before aggregating, so a concurrent write cannot move the window mid-run.

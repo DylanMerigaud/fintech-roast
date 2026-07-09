@@ -9,7 +9,8 @@ Part of the [fintech-roast](../README.md) rulebook. See [README.md](README.md) f
 **What to detect**
 
 - A money/amount/price/balance/total field emitted into JSON as a bare numeric literal (e.g. `"amount": 19.99` or `"balance": 90071992547409910`), not quoted and not an integer count of minor units.
-- Server code that puts a float/double/BigDecimal straight into a JSON body: `json.Marshal(struct{Amount float64}...)` (Go), `JSON.stringify({amount: total})` where `total` is a JS number, Jackson serializing a `double`/`BigDecimal` money field without a to-string serializer, Python `json.dumps({"amount": Decimal(...)})` coerced via a float default.
+- Server code that puts a float/double/BigDecimal straight into a JSON body: `json.Marshal(struct{Amount float64}...)` (Go), `JSON.stringify({amount: total})` where `total` is a JS number, Jackson serializing a `double`/`BigDecimal` money field without a to-string serializer.
+- Python: a FastAPI/pydantic response model that types the amount `float` (`price: float`), or `json.dumps({"amount": 19.99})` of a float amount, both of which emit a bare JSON number. `json.dumps({"amount": Decimal("19.99")})` raises `TypeError: Object of type Decimal is not JSON serializable`, and the reflexive fix devs reach for (`float(amount)` or a `default=float` encoder) throws the precision away right at the boundary. On the read side `json.loads(body)` decodes every `19.99` into a Python `float` by default, so even a producer that sent an exact value lands it in binary64 unless the caller passes `parse_float=Decimal`.
 - Client code parsing the amount back with a default JSON number reader (`JSON.parse` in JS, `encoding/json` into `float64`, `json.loads` into a Python float), so the value lands in an IEEE 754 double regardless of how the producer stored it.
 - Integer money in minor units that can exceed 2^53-1 (9007199254740991): large aggregate balances, satoshi/wei-scale crypto amounts, high-precision or high-volume ledgers serialized as JSON numbers.
 - OpenAPI/JSON Schema definitions typing a money field as `type: number` or `format: double`/`float` rather than `type: string` (or a documented integer minor-unit contract).
@@ -26,6 +27,22 @@ Do not put money on the wire as a JSON number. Serialize it either as a decimal 
 { "amount_minor": 1999, "currency": "USD" }
 ```
 
+```python
+# Python: serialize Decimal money as a string, and decode with parse_float=Decimal
+# so the value never touches a binary float on either side of the wire.
+import json
+from decimal import Decimal
+
+class MoneyEncoder(json.JSONEncoder):
+    def default(self, o):
+        if isinstance(o, Decimal):
+            return str(o)                      # "19.99", not the float 19.99
+        return super().default(o)
+
+body = json.dumps({"amount": Decimal("19.99"), "currency": "USD"}, cls=MoneyEncoder)
+data = json.loads(body, parse_float=Decimal)   # data["amount"] is Decimal("19.99")
+```
+
 **False positives**
 
 - Zero-decimal or approximate values where sub-unit precision is irrelevant and the magnitude stays well under 2^53: a JPY integer amount, a display-only rounded figure, or a percentage/FX-rate field that is genuinely a rate rather than a settled money amount.
@@ -37,6 +54,7 @@ Do not put money on the wire as a JSON number. Serialize it either as a decimal 
 1. [RFC 8259: The JavaScript Object Notation (JSON) Data Interchange Format, Section 6 (Numbers)](https://datatracker.ietf.org/doc/html/rfc8259#section-6) (IETF)
 2. [Number.MAX_SAFE_INTEGER](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/MAX_SAFE_INTEGER) (MDN Web Docs)
 3. [decimal: Decimal fixed-point and floating-point arithmetic](https://docs.python.org/3/library/decimal.html) (Python Software Foundation)
+4. [json, JSON encoder and decoder](https://docs.python.org/3/library/json.html) (Python Software Foundation)
 
 ## API-2: GraphQL Float used for a money field
 
@@ -44,7 +62,8 @@ Do not put money on the wire as a JSON number. Serialize it either as a decimal 
 
 **What to detect**
 
-- A schema field for money typed `Float`: `price: Float`, `amount: Float!`, `total: Float`, `balance: Float` in an SDL `.graphql` file or in code-first builders (`t.float(...)`, `GraphQLFloat`, `@Field(() => Float)` in Nest/TypeGraphQL, `graphene.Float()`).
+- A schema field for money typed `Float`: `price: Float`, `amount: Float!`, `total: Float`, `balance: Float` in an SDL `.graphql` file or in code-first builders (`t.float(...)`, `GraphQLFloat`, `@Field(() => Float)` in Nest/TypeGraphQL).
+- Python: a Graphene field typed `graphene.Float()` for money, a Strawberry field annotated `amount: float` (Strawberry maps the `float` annotation onto the GraphQL `Float` scalar), or a resolver returning a Python `float` for a price/balance. Money as `graphene.Int()` at a magnitude above 2^31-1 has the same overflow trap as any Int minor-unit field.
 - Resolvers returning a JavaScript number / Python float / Go float64 for a money field, or input args declared `Float` that feed a charge, transfer, refund, or price mutation.
 - A custom scalar named `Money`/`Decimal`/`Currency` that is actually implemented as a thin alias over `Float` (its `serialize`/`parseValue` just cast to a number).
 - Money represented as `Int` minor units but at a magnitude that can exceed the GraphQL Int bound of 2^31-1 (2147483647), e.g. a balance in cents above roughly 21.4 million dollars, which overflows the spec's signed 32-bit Int.
@@ -57,6 +76,28 @@ The GraphQL specification defines `Float` as a signed double-precision value as 
 **Fix**
 
 Do not type money as `Float`. Use one of: `Int` minor units when every value provably fits in signed 32 bits and you carry a currency code alongside; a `String` scalar parsed into BigDecimal/Decimal; or a custom `Money` scalar or object type whose `serialize` and `parseValue` refuse floats and round-trip an exact decimal string or an int64 minor-unit plus currency pair. A common robust shape is an object type `{ amountMinor: String!, currency: String! }` (amount as a string to dodge both the Float and the 32-bit Int traps). Validate the scalar at the boundary so a float or an out-of-range integer is a hard error, not a rounded value.
+
+```python
+# Python (Graphene): a custom Money scalar that serializes Decimal to a string
+# and parses input back into an exact Decimal, rejecting bare floats.
+import graphene
+from decimal import Decimal
+
+class Money(graphene.Scalar):
+    @staticmethod
+    def serialize(value):
+        return str(value)                      # Decimal("19.99") to "19.99", never a Float
+
+    @staticmethod
+    def parse_value(value):
+        if isinstance(value, float):
+            raise ValueError("money must be a decimal string, not a float")
+        return Decimal(str(value))
+
+class Invoice(graphene.ObjectType):
+    amount = Money(required=True)              # not graphene.Float()
+    currency = graphene.String(required=True)
+```
 
 **False positives**
 
@@ -77,7 +118,8 @@ Do not type money as `Float`. Use one of: `Int` minor units when every value pro
 
 - `parseFloat(...)` or `parseInt(...)` applied to a user- or API-supplied amount string in JS/TS (`parseFloat(req.body.amount)`, `parseFloat(input.price)`).
 - `Number(x)`, unary `+x`, or `x * 1` coercion of a money string into a JS number before storing or charging.
-- Language equivalents: Python `float(amount_str)`, Go `strconv.ParseFloat(s, 64)`, Java `Double.parseDouble(s)` / `Float.parseFloat(s)`, Ruby `s.to_f`, PHP `floatval`/`(float)` on a money value.
+- Language equivalents: Go `strconv.ParseFloat(s, 64)`, Java `Double.parseDouble(s)` / `Float.parseFloat(s)`, Ruby `s.to_f`, PHP `floatval`/`(float)` on a money value.
+- Python: `float(amount_str)` or `float(request.json["amount"])` / `float(request.form["price"])` on a request-supplied amount, coercing it into a binary `float` before it is stored or charged. Unlike JS `parseFloat`, Python `float("12,34")` raises `ValueError` on a comma-decimal locale string rather than silently truncating, but `float("1.1")` still lands an inexact binary value, and a `try/except` that falls back to `0.0` on the `ValueError` turns a malformed amount into a silent zero charge.
 - Locale-formatted amounts fed to a dot-only parser: strings containing a comma decimal separator (`"1.234,56"` DE/BR, `"1 234,56"` FR) or thousands separators, parsed with `parseFloat`/`Number` which only accept `.`.
 - The parsed result flowing onward without a validity gate: no check that the whole string was consumed, no `Number.isNaN`/`math.isnan` guard, no rejection of trailing garbage.
 - Building an amount from concatenated fields then `to_f`/`parseFloat`, or summing several such parsed values into a total that then hits a ledger or charge call.
@@ -89,6 +131,23 @@ Do not type money as `Float`. Use one of: `Int` minor units when every value pro
 **Fix**
 
 Do not parse money with float-coercing functions. Validate the amount string against a strict, locale-explicit numeric grammar first (reject trailing characters, empty input, and unexpected separators), normalize the known input locale to a canonical form, then parse into an exact decimal type: BigDecimal (Java), `decimal.Decimal` (Python), a big-decimal library or integer-cents parse (JS/TS), `math/big.Rat` or a cents `int64` (Go), `BigDecimal` (Ruby). Reject rather than round: a value that does not fully match the grammar is a 400, not a best-effort number. If the product accepts localized input, parse with an explicit locale-aware parser (for example `Intl.NumberFormat` formatToParts logic or a server-side locale parser), never `parseFloat`.
+
+```python
+# Python: match a strict canonical grammar, then build the Decimal from the
+# string (never through float), so no partial parse or binary rounding happens.
+import re
+from decimal import Decimal, InvalidOperation
+
+MONEY_RE = re.compile(r"^-?\d+(\.\d{1,2})?$")   # canonical dot-decimal, up to 2 places
+
+def parse_money(raw: str) -> Decimal:
+    if not MONEY_RE.fullmatch(raw.strip()):     # reject "", "12,34", "3.14abc"
+        raise ValueError(f"not a canonical money string: {raw!r}")  # -> 400, do not coerce
+    try:
+        return Decimal(raw.strip())             # exact; float(raw) would reintroduce binary error
+    except InvalidOperation:
+        raise ValueError(f"not a canonical money string: {raw!r}")
+```
 
 **False positives**
 
@@ -112,6 +171,7 @@ Do not parse money with float-coercing functions. Validate the amount string aga
 - The same logical amount modeled differently in different services or tables: one field in cents (`amount_cents`, integer), another in decimal units (`amount` NUMERIC), a third as a string, with no shared type or documented contract at the boundary.
 - A money field passed between services with no accompanying currency code, so the receiver has to assume the currency and the minor-unit scale.
 - Adapter/mapper code that multiplies or divides by 100 to bridge two services (`amount * 100`, `total / 100.0`, `cents = int(dollars * 100)`), a tell that the two sides disagree on units and are being reconciled ad hoc (and often via a float).
+- Python: one service's pydantic model typing the amount `float` while another types it `Decimal` and a third `int` cents, with no shared Money model imported across them; a `cents = int(dollars * 100)` bridge (which also floats before it ints, dropping a cent) instead of a single canonical type; a pydantic model carrying an amount but no `currency` field, so the scale is assumed at every hop.
 - Mixed scale assumptions for zero-decimal or three-decimal currencies (JPY has no minor unit, BHD and TND have three per ISO 4217): a hardcoded `*100` that is wrong for those currencies.
 - Column/type drift across the codebase for the same concept: `NUMERIC`/`DECIMAL` in one schema, `BIGINT` cents in another, `money` (the Postgres locale-dependent type) or `FLOAT`/`DOUBLE` elsewhere.
 - An internal API or event that names a field just `amount`/`price`/`total` with no unit suffix and no currency sibling, forcing every consumer to guess.
@@ -123,6 +183,22 @@ When each service picks its own money shape, every hop across the boundary is a 
 **Fix**
 
 Adopt a single canonical money shape and use it on every internal boundary: an amount plus an explicit ISO 4217 currency, with a defined scale. Two well-trodden options are google.type.Money (int64 `units` plus int32 `nanos` at 10^-9, with sign-consistency rules, plus `currency_code`) and Stripe-style integer minor units (an integer in the smallest unit for that currency, always with the currency code so the scale is unambiguous, e.g. 1099 = 10.99 USD, 10 = 10 JPY). Encapsulate it in a Money type (Fowler's pattern: amount plus currency, never a bare number) and forbid raw `*100` conversions across services. Enforce the shared shape in the API schema and in contract tests so no service can quietly ship its own units, and make currency a required field everywhere money crosses a boundary.
+
+```python
+# Python: one shared pydantic Money model, imported by every service. It carries
+# a Decimal internally and serializes the amount as a string, so no float and no
+# bare *100 bridge crosses a boundary. Currency is required, never assumed.
+from decimal import Decimal
+from pydantic import BaseModel, field_serializer
+
+class Money(BaseModel):
+    amount: Decimal                            # exact, not float
+    currency: str                              # ISO 4217, required at every hop
+
+    @field_serializer("amount")
+    def _amount_to_str(self, v: Decimal) -> str:
+        return str(v)                          # on the wire as "10.99", parsed back into Decimal
+```
 
 **False positives**
 
