@@ -98,6 +98,14 @@ type Cents = number & { readonly __brand: 'Cents' };
 const toCents = (major: number): Cents => Math.round(major * 100) as Cents;
 ```
 
+```python
+# Python has no branded types; a NewType gives a distinct "cents" type the checker enforces
+from typing import NewType
+from decimal import Decimal
+Cents = NewType("Cents", int)
+def to_cents(major: Decimal) -> Cents: return Cents(int((major * 100).to_integral_value()))
+```
+
 Pick one convention per system, document it, and pin the asset scale per ledger/currency (TigerBeetle: map the smallest useful unit to 1, and treat that scale as immutable). Across service and JSON boundaries, send amount plus currency plus minor-unit exponent together rather than a naked integer. Prefer a decimal type when the app does not clearly benefit from integer minor units.
 
 **False positives**
@@ -193,6 +201,7 @@ Drive scaling from a currency-to-minor-unit-exponent table (ISO 4217, maintained
 - Fixed-width wire/price formats (price * 10000 packed into a 4-byte field) without a documented ceiling.
 - Arithmetic that widens then narrows: `a * b` computed in a 32-bit type before assignment, silently overflowing the intermediate.
 - JSON amounts round-tripped through a JS number without BigInt or a string, losing precision above 2^53.
+- Python `int` is arbitrary precision so the amount never overflows in memory, which hides the risk: it resurfaces at the boundary, a wide value written to a 32/64-bit DB column, or serialized to JSON and read back by a JavaScript consumer above 2^53.
 
 **Why it breaks**
 
@@ -214,3 +223,41 @@ Size the type for the largest total the system can ever reach in minor units, in
 1. [MDN: Number.MAX_SAFE_INTEGER](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/MAX_SAFE_INTEGER) (MDN Web Docs, Mozilla)
 2. [TigerBeetle Docs: Data Modeling](https://docs.tigerbeetle.com/coding/data-modeling/) (TigerBeetle)
 3. [Nasdaq halts Berkshire Hathaway price feed over 32-bit limit](https://www.theregister.com/2021/05/07/bug_warren_buffett_rollover_nasdaq/) (The Register)
+
+## STO-7: Exact-decimal money constructed from a binary float
+
+**Severity**: critical
+
+**What to detect**
+
+- Python: `Decimal(0.1)`, `Decimal(amount)` where `amount` is a `float`, or `Decimal.from_float(...)` on a money value, instead of `Decimal("0.1")` or `Decimal(str(amount))`.
+- A float literal or a float variable passed into a decimal constructor anywhere on a money path, so the value is already wrong before any arithmetic or rounding runs.
+- Parsing an amount with `float(...)` first and only wrapping it in `Decimal` afterward (precision is lost at the `float()` call; the `Decimal` just freezes the error).
+- A helper that accepts a `float` amount and returns a `Decimal`, which looks safe at the call site but launders a lossy value into an exact-looking one.
+
+**Why it breaks**
+
+An exact-decimal type only helps if it is fed an exact value. A binary float cannot represent most decimal fractions, so constructing a decimal directly from a float copies the float's error into the decimal verbatim: Python's `Decimal(0.1)` is `0.1000000000000000055511151231257827021181583404541015625`, not `0.1`, because `0.1` stopped being `0.1` the moment it became a `float`. The decimal then carries that noise into every downstream sum, rounding, and comparison, and because it is now a "precise" type the error looks authoritative and survives review. The same trap exists in any language where an exact type has a float constructor. Keeping money out of `float` entirely, and building the decimal from a string, is the only reliable fix.
+
+**Fix**
+
+Construct decimals from strings, never from floats. Parse external input straight into `Decimal("...")`, and forbid `float` anywhere on the money path so a float can never reach the constructor. Use `Decimal(str(x))` only when the source is already a correct decimal string or an integer. If a value genuinely arrives as a float from a legacy boundary, fix that boundary; a later `Decimal(...)` cannot recover the lost digits.
+
+```python
+from decimal import Decimal
+Decimal("0.1")        # 0.1 exactly
+Decimal(0.1)          # 0.1000000000000000055... (the float's error, preserved)
+Decimal(1999)         # exact: an integer is fine (minor units)
+```
+
+**False positives**
+
+- `Decimal(str(x))` or `Decimal(x)` where `x` is known to be a clean decimal string or an integer, and the conversion is deliberate and documented.
+- Non-money quantities (a scientific measurement, a ratio, a weight) where the float origin is acceptable and the value never becomes an amount.
+- A test that intentionally builds `Decimal(0.1)` to demonstrate the very trap this rule describes.
+- A value coming from a decimal-typed database column via a driver that already returns `Decimal`, where no `float` is involved despite a `Decimal(...)` call nearby.
+
+**Sources**
+
+1. [decimal, Decimal fixed-point and floating-point arithmetic](https://docs.python.org/3/library/decimal.html) (Python Software Foundation)
+2. [What Every Computer Scientist Should Know About Floating-Point Arithmetic](https://docs.oracle.com/cd/E19957-01/806-3568/ncg_goldberg.html) (David Goldberg, Oracle mirror of ACM Computing Surveys 1991)
