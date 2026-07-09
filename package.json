@@ -1,0 +1,31 @@
+{
+  "name": "fintech-roast",
+  "version": "0.0.1",
+  "description": "An agent that roasts the code that touches money. Sourced rulebook + Claude Code plugin.",
+  "keywords": [
+    "fintech",
+    "money",
+    "payments",
+    "audit",
+    "code-review",
+    "static-analysis",
+    "claude-code",
+    "ledger",
+    "rounding"
+  ],
+  "homepage": "https://github.com/DylanMerigaud/fintech-roast",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DylanMerigaud/fintech-roast.git"
+  },
+  "bugs": {
+    "url": "https://github.com/DylanMerigaud/fintech-roast/issues"
+  },
+  "author": "Dylan Merigaud",
+  "license": "MIT",
+  "files": [
+    "rules",
+    "README.md",
+    "LICENSE"
+  ]
+}

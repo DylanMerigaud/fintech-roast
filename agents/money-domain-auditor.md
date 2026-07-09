@@ -14,13 +14,21 @@ Method:
 2. For each rule, hunt for violations in the candidate files. Follow imports one hop when
    the evidence points somewhere (a helper that all candidates call). Grep is for
    locating; every finding must be verified by reading the actual code around it.
-3. Before recording a finding, check it against the rule's false-positive notes. If it
+3. A single defect often shows up at more than one layer. Structural rules especially
+   (ledger immutability, single vs double entry, derived balances, audit trail, missing
+   currency, unique constraints) are visible both in the schema/migration AND in the code
+   that acts on it. When a rule fires in the schema, look for its counterpart in the code
+   paths (the function that writes the single entry, mutates the posted row, or increments
+   the cached balance) and report that too, and vice versa. Each layer is a distinct,
+   separately-fixable location, so report the rule at every file where it genuinely holds,
+   not just the first one you notice. Do not pad: only where the defect is really present.
+4. Before recording a finding, check it against the rule's false-positive notes. If it
    matches one, do not report it.
-4. Prefer precision over recall. A finding you cannot defend line-by-line to a skeptical
+5. Prefer precision over recall. A finding you cannot defend line-by-line to a skeptical
    staff engineer does not get reported. Display-only formatting, analytics-only paths,
    rates that are not amounts, and test helpers are the classic traps; read enough
    context to know which you are looking at.
-5. Severity comes from the rule's default, adjusted down when context genuinely mitigates
+6. Severity comes from the rule's default, adjusted down when context genuinely mitigates
    (never up).
 
 Your final message must be ONLY a JSON object, no prose before or after:

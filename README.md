@@ -5,6 +5,11 @@
 
 An agent that roasts the code that touches money.
 
+![fintech-roast running over the eval fixture](assets/roast-demo.gif)
+
+<sub>A replay of the run scored in [eval/RESULTS.md](eval/RESULTS.md) (53 findings over the
+planted-bug fixture). Real rule ids and file lines; the report shape the plugin prints.</sub>
+
 It scans a repository for the surfaces where money lives (schemas, webhooks, calculation
 code, serialization), audits each against a sourced rulebook of how money-handling code
 actually breaks, adversarially verifies every finding, and reports what survives with the
