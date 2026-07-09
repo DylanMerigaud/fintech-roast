@@ -1,0 +1,26 @@
+{
+  "fixture": "eval/fixture-py",
+  "notes": "Deliberately-buggy Python billing fixture. Computation domains only so far (STO, ROU, FX, TIM, TAX, AGG). Stateful domains (IDE webhooks and balances, LED ledger, API serialization, DB schema, TST tests) are pending in a later pass, so this key is partial and recall is measured against the 20 bugs below. Green by design: pytest passes because every fixture input is round-number and single-currency, so the buggy path and the correct path produce the same output.",
+  "planted": [
+    {"key": "P01", "rule": "API-3", "files": ["fixture-py/money.py"], "note": "parse_amount coerces a money string with float(input) instead of Decimal, inexact double on money input"},
+    {"key": "P02", "rule": "STO-1", "files": ["fixture-py/money.py"], "note": "money flows through Python float everywhere (parse_amount returns float, round_money operates on float) instead of Decimal or integer minor units"},
+    {"key": "P03", "rule": "STO-5", "files": ["fixture-py/money.py"], "note": "to_minor_units and from_minor_units hardcode *100 and /100 for every currency, no ISO 4217 exponent lookup (breaks JPY and BHD)"},
+    {"key": "P04", "rule": "ROU-1", "files": ["fixture-py/money.py"], "note": "round_money is the shared money rounding helper and uses bare round(value, 2) on a float, no explicit rounding mode"},
+    {"key": "P05", "rule": "STO-7", "files": ["fixture-py/money.py"], "note": "to_decimal builds Decimal(amount) from a float argument, inheriting the inexact binary tail instead of Decimal(str(amount))"},
+    {"key": "P06", "rule": "ROU-3", "files": ["fixture-py/invoice.py"], "note": "invoice_total rounds each intermediate step then compounds: round the discounted subtotal, then round the taxed amount, so order and intermediate rounding are baked in"},
+    {"key": "P07", "rule": "ROU-4", "files": ["fixture-py/invoice.py"], "note": "bundle_line_total divides before multiplying: a per-unit price rounded from bundle_total/quantity is then multiplied back by quantity"},
+    {"key": "P08", "rule": "ROU-2", "files": ["fixture-py/split.py"], "note": "split_proportionally independently rounds each share with no residual reconciliation, so parts do not sum back to total on non-clean ratios"},
+    {"key": "P09", "rule": "TAX-1", "files": ["fixture-py/tax.py"], "note": "invoice_tax_by_lines rounds tax per line while invoice_tax_on_total rounds on the invoice total, with no reconciliation between the two paths"},
+    {"key": "P10", "rule": "TAX-2", "files": ["fixture-py/tax.py"], "note": "extract_tax_from_gross computes embedded tax as gross * rate instead of gross - gross/(1+rate), an inclusive versus exclusive mixup"},
+    {"key": "P11", "rule": "TAX-3", "files": ["fixture-py/tax.py"], "note": "SALES_TAX_RATE = 0.0825 stored as a bare float and multiplied on floats, no Decimal rate"},
+    {"key": "P12", "rule": "FX-1", "files": ["fixture-py/fx.py"], "note": "refund_in_original_currency assumes a lossless round-trip, converting back via independently rounded float rates (0.92 vs 1.087, not 1/rate)"},
+    {"key": "P13", "rule": "FX-2", "files": ["fixture-py/fx.py"], "note": "RATES is a mutable module-level dict used as the rate source with no value, source, or timestamp captured on any converted amount"},
+    {"key": "P14", "rule": "FX-3", "files": ["fixture-py/fx.py"], "note": "settle_invoice overwrites the invoice total and currency in place, dropping the original billed amount and currency"},
+    {"key": "P15", "rule": "FX-4", "files": ["fixture-py/fx.py"], "note": "total_revenue adds invoice totals across currencies with no currency guard, summing USD, EUR, and MXN as one unit"},
+    {"key": "P16", "rule": "TIM-2", "files": ["fixture-py/interest.py"], "note": "days_between computes (end.timestamp() - start.timestamp()) / 86400, naive of DST so any non-86400s day is miscounted"},
+    {"key": "P17", "rule": "TIM-4", "files": ["fixture-py/interest.py"], "note": "accrued_interest uses a hardcoded annual_rate / 365 daily rate with no day-count convention"},
+    {"key": "P18", "rule": "TIM-3", "files": ["fixture-py/interest.py"], "note": "transactions_in_period treats both endpoints as inclusive, so a transaction on a shared boundary is double-counted across consecutive periods"},
+    {"key": "P19", "rule": "AGG-1", "files": ["fixture-py/reports.py"], "note": "sum_amounts totals money by adding raw Python floats in a loop, accumulating binary-float error instead of Decimal"},
+    {"key": "P20", "rule": "AGG-3", "files": ["fixture-py/reports.py"], "note": "total_all_pages paginates with limit and offset over live data, so inserts or deletes between fetches make the aggregate drift"}
+  ]
+}
