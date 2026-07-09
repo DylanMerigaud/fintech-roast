@@ -9,7 +9,7 @@ report that you found nothing, which is a valid outcome. Precision beats recall:
 false accusation costs more credibility than three missed bugs.
 
 Scope: `$ARGUMENTS` if provided (a path or a hint about what to audit), otherwise the
-repository root. Skip `node_modules`, build output, vendored code, and lockfiles. If the
+repository root. Skip dependency and build output (`node_modules`, `.venv`, `__pycache__`, `target/`, `build/`, `.gradle`, `vendor/`), vendored code, and lockfiles. If the
 scope itself looks like a test fixture of planted bugs, audit it anyway and say nothing
 special about it.
 
@@ -29,7 +29,7 @@ for identifier signals: `amount|price|total|balance|fee|invoice|payment|payout|r
 charge|billing|ledger|currency|tax|rate|settle|payin|payout|wallet`, and for surface
 signals:
 
-- schema and migrations: `CREATE TABLE`, `ALTER TABLE`, ORM models with money-ish columns
+- schema and migrations: `CREATE TABLE`, `ALTER TABLE`, ORM models with money-ish columns (JPA `@Entity`/`@Column`, Django/SQLAlchemy models, Prisma schema, Sequelize/GORM)
 - webhook handlers: routes or functions handling `stripe|paypal|adyen|webhook|event`
 - calculation modules: functions doing arithmetic on the identifiers above
 - API serialization: response builders, GraphQL schemas, JSON encoders touching amounts

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Score an audit run against the planted-bug answer key.
 
-Usage: python3 eval/score.py <findings.json>
+Usage: python3 eval/score.py [--expected PATH] <findings.json>
 
 findings.json shape: {"findings": [{"rule": "STO-1", "file": "db/schema.sql",
 "line": 3, "description": "..."}]}
@@ -13,6 +13,7 @@ bug is reported for manual triage (the fixture is dense, so an unmatched finding
 may be a real, unindexed issue rather than a false positive).
 """
 
+import argparse
 import json
 import sys
 from pathlib import Path
@@ -21,13 +22,22 @@ HERE = Path(__file__).parent
 
 
 def main() -> int:
-    if len(sys.argv) != 2:
-        print(__doc__)
-        return 2
+    parser = argparse.ArgumentParser(
+        description="Score an audit run against a planted-bug answer key."
+    )
+    parser.add_argument(
+        "findings", help='findings JSON: {"findings": [{"rule", "file", ...}]}'
+    )
+    parser.add_argument(
+        "--expected",
+        default=str(HERE / "expected.json"),
+        help="answer key path (default: expected.json next to this script)",
+    )
+    args = parser.parse_args()
 
-    expected = json.loads((HERE / "expected.json").read_text())
+    expected = json.loads(Path(args.expected).read_text())
     planted = expected["planted"]
-    findings = json.loads(Path(sys.argv[1]).read_text())["findings"]
+    findings = json.loads(Path(args.findings).read_text())["findings"]
 
     matched_keys: set[str] = set()
     matched_findings = 0

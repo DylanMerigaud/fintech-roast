@@ -35,7 +35,7 @@ SEVERITIES = {"critical", "high", "medium", "low"}
 SECTION_ORDER = ["**What to detect**", "**Why it breaks**", "**Fix**", "**False positives**", "**Sources**"]
 RULE_HEADING = re.compile(r"^## ([A-Z]{2,4}-\d+): (.+)$")
 SOURCE_LINE = re.compile(r"^\d+\. \[[^\]]+\]\(https?://[^)]+\) \(.+\)$")
-TEXT_EXTENSIONS = {".md", ".ts", ".tsx", ".js", ".json", ".py", ".sql", ".yml", ".yaml", ".txt"}
+TEXT_EXTENSIONS = {".md", ".ts", ".tsx", ".js", ".json", ".py", ".sql", ".yml", ".yaml", ".txt", ".java", ".kt"}
 
 errors: list[str] = []
 
