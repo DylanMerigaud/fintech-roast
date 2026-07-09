@@ -13,6 +13,15 @@ repository root. Skip `node_modules`, build output, vendored code, and lockfiles
 scope itself looks like a test fixture of planted bugs, audit it anyway and say nothing
 special about it.
 
+**Finding the rulebook.** The rule files ship with this plugin under a `rules/` directory
+next to this skill's plugin root, referenced below as `${CLAUDE_PLUGIN_ROOT}/rules/`. If
+that variable is already an absolute path on disk, use it directly. If it appears as the
+literal text `${CLAUDE_PLUGIN_ROOT}`, resolve the plugin root first: this plugin lives in
+the Claude plugin cache (typically under `~/.claude/plugins/`), so glob for a `rules/`
+directory that contains `storage-and-types.md` and `README.md` and use that absolute path
+everywhere below (including the paths you hand to subagents). Do this resolution once, up
+front, before Step 1.
+
 ## Step 1: scan for money surfaces
 
 Find where money lives before reading anything deeply. Grep the scope (case-insensitive)

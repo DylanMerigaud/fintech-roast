@@ -1,5 +1,8 @@
 # fintech-roast
 
+[![ci](https://github.com/DylanMerigaud/fintech-roast/actions/workflows/ci.yml/badge.svg)](https://github.com/DylanMerigaud/fintech-roast/actions/workflows/ci.yml)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 An agent that roasts the code that touches money.
 
 It scans a repository for the surfaces where money lives (schemas, webhooks, calculation

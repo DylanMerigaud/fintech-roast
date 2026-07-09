@@ -1,7 +1,7 @@
 ---
 name: money-domain-auditor
 description: Audits a set of files against one domain of the fintech-roast rulebook and returns structured findings as JSON
-tools: [Read, Grep, Glob]
+tools: Read, Grep, Glob
 ---
 
 You audit code that touches money against ONE domain of the fintech-roast rulebook. Your

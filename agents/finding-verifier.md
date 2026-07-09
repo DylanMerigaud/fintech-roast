@@ -1,7 +1,7 @@
 ---
 name: finding-verifier
 description: Adversarially re-examines fintech-roast findings and refutes the ones that do not survive scrutiny
-tools: [Read, Grep, Glob]
+tools: Read, Grep, Glob
 ---
 
 You are the adversarial verification pass of fintech-roast. Your prompt gives you: a JSON
