@@ -10,7 +10,7 @@ Part of the [fintech-roast](../README.md) rulebook. See [README.md](README.md) f
 
 - SQL columns typed FLOAT, DOUBLE, DOUBLE PRECISION, or REAL on money-ish names (amount, price, total, balance, fee, tax, subtotal, cost, rate), or a Postgres value cast to `money` from a float.
 - Language float/double holding money: Java/C#/Go/Kotlin `double` or `float` fields, a TypeScript/JS `number` used as an amount (JS numbers are IEEE-754 doubles), `float()` on a currency value in Python.
-- ORM mappings that pick a float type for a money field: Hibernate `double`, SQLAlchemy `Float`, Sequelize `FLOAT`/`DOUBLE`, GORM `float64`.
+- ORM mappings that pick a float type for a money field: a JPA/Hibernate `double`/`Double`/`float`/`Float` entity field (which maps to an approximate SQL column, and where `@Column(precision, scale)` is silently ignored because it "applies only if a decimal column is used"), SQLAlchemy `Float` / `Numeric(asdecimal=False)`, Prisma `Float`, Sequelize `FLOAT`/`DOUBLE`, GORM `float64`.
 - Money arithmetic that relies on `==` equality, or that computes `price * qty * rate` in floating point before rounding.
 - JSON/protobuf schemas declaring an amount as `number`/`double` rather than a string decimal or an integer minor unit.
 - Comments or code "fixing" drift with epsilon comparisons (`abs(a-b) < 0.001`) on monetary values.
@@ -21,7 +21,15 @@ IEEE-754 binary floating point represents values in base 2, so common decimal fr
 
 **Fix**
 
-Store and compute money in an exact type: a fixed-scale decimal (SQL NUMERIC/DECIMAL, Java BigDecimal, Python `decimal.Decimal`, C# `decimal`, Ruby BigDecimal) or an integer number of minor units. PostgreSQL explicitly recommends `numeric` "for storing monetary amounts and other quantities where exactness is required" and says `real`/`double precision` are inexact. Never use a language float/double or SQL FLOAT/REAL/DOUBLE for amounts, and avoid the PostgreSQL `money` type (it is locale-bound, see STO-4). In JavaScript, where every number is a double, keep amounts as integer minor units or a decimal library, never a bare `Number`.
+Store and compute money in an exact type: a fixed-scale decimal (SQL NUMERIC/DECIMAL, Java BigDecimal, Python `decimal.Decimal`, C# `decimal`, Ruby BigDecimal) or an integer number of minor units. PostgreSQL explicitly recommends `numeric` "for storing monetary amounts and other quantities where exactness is required" and says `real`/`double precision` are inexact. Never use a language float/double or SQL FLOAT/REAL/DOUBLE for amounts, and avoid the PostgreSQL `money` type (it is locale-bound, see STO-4). In JavaScript, where every number is a double, keep amounts as integer minor units or a decimal library, never a bare `Number`. In JPA/Hibernate, type the entity field `BigDecimal` (not `double`/`Double`), which maps to a decimal column and is the only case where `@Column(precision, scale)` takes effect.
+
+```java
+double total = 19.99;                       // wrong: IEEE-754, not exact
+BigDecimal total = new BigDecimal("19.99"); // exact
+
+@Column(precision = 19, scale = 4)          // takes effect only on a decimal field
+private BigDecimal amount;                  // not `double amount`, which maps to a float column
+```
 
 **False positives**
 
@@ -35,6 +43,7 @@ Store and compute money in an exact type: a fixed-scale decimal (SQL NUMERIC/DEC
 1. [What Every Computer Scientist Should Know About Floating-Point Arithmetic](https://docs.oracle.com/cd/E19957-01/806-3568/ncg_goldberg.html) (David Goldberg, ACM Computing Surveys, Oracle mirror)
 2. [PostgreSQL Documentation: Numeric Types](https://www.postgresql.org/docs/current/datatype-numeric.html) (PostgreSQL Global Development Group)
 3. [Floats Don't Work For Storing Cents](https://www.moderntreasury.com/journal/floats-dont-work-for-storing-cents) (Modern Treasury)
+4. [Jakarta Persistence 3.1: Column annotation (precision, scale)](https://jakarta.ee/specifications/persistence/3.1/apidocs/jakarta.persistence/jakarta/persistence/column) (Eclipse Foundation, Jakarta EE)
 
 ## STO-2: DECIMAL/NUMERIC declared with wrong precision or scale
 
