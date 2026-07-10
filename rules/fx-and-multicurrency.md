@@ -11,6 +11,7 @@ Part of the [fintech-roast](../README.md) rulebook. See [README.md](README.md) f
 - A convert() helper used symmetrically, e.g. `convert(convert(amount, 'USD', 'EUR'), 'EUR', 'USD')`, or a test asserting the two are equal (`assertEqual(x, backToX)`).
 - Reverse conversion computed as `amount / rate` or `amount * (1/rate)` instead of fetching an independent inverse or opposite-pair quote: look for `1 / rate`, `1.0/rate`, `reciprocal`, `invert(rate)` used to settle or book a value (not just to display).
 - Python: `1.0 / rate` (or `1 / rate`) on a float used to build the return leg, then the there-and-back result compared for equality (`assert back == amount`); a `convert()` that rounds with `round(..., 2)` / `Decimal.quantize` on each leg and is called twice for a round-trip; a `pytest.approx` or `==` check that expects `convert(convert(x, "USD", "EUR"), "EUR", "USD")` to return `x`.
+- Java: `amount.divide(rate)` or `BigDecimal.ONE.divide(rate, ...)` used to build the return leg instead of an independently fetched inverse quote, then a `compareTo` / `equals` asserting the round-trip returns the start; a JSR 354 `MonetaryAmount` round-tripped through a `CurrencyConversion` both ways and expected to reconcile to the minor unit.
 - Cross-currency conversion done in one multiply (from -> to) with no intermediate base leg, especially between two non-USD currencies (EUR->GBP as a single stored rate), where a same-time round-trip is then expected to reconcile to the cent.
 - Rounding applied on every leg (`round`, `.quantize(`, `toFixed(2)`, `Math.round(x*100)/100`, `ROUND_HALF_UP`) inside a function called twice for a there-and-back conversion, with the two ends compared for equality.
 - Equality or invariant checks on money that survive a conversion cycle: `if (recomputedTotal == originalTotal)`, or a reconciliation that expects converted balances to net to exactly zero after a round-trip.
@@ -60,6 +61,7 @@ assert abs(back - usd) <= Decimal("0.02")     # tolerance, never assert back == 
 - A converted amount column with no adjacent rate columns: schema has `amount_usd` but lacks `fx_rate`, `fx_rate_source`, and `fx_rate_timestamp` (or `rate_date`).
 - Rate fetched from a provider (ECB, openexchangerates, a bank API, `rates[to]`) and used immediately without storing the returned value and the as-of time.
 - Python: a mutable module-level `RATES = {...}` dict (or a global refreshed by a scheduler) read at conversion time as the only rate source, so no per-row `(rate, source, as_of)` is captured; `requests.get(...).json()["rates"][to]` multiplied straight into an amount with nothing persisted; a `dataclass`/model row that has `amount_usd` but no `fx_rate` / `fx_rate_source` / `fx_rate_as_of` fields.
+- Java: a converted-amount `@Entity` field with no adjacent `fxRate`/`fxRateSource`/`fxRateAsOf` columns, a mutable Spring `@Bean`/singleton rate map read at conversion time as the only source, or a `RestTemplate`/`WebClient` rate fetch multiplied straight into an amount with nothing persisted (no point-in-time `ExchangeRate` row as JSR 354 models it).
 - Historical figures recomputed with today's rate: reports that call the same convert() over past transactions, or a nightly job that re-values old rows using the current rate table.
 - A single mutable `rates` config or table overwritten in place (`UPDATE fx_rates SET rate = ...`, or `RATES[pair] = new_rate` in Python) so past conversions can no longer be reproduced.
 - Absence of a point-in-time rate record: no `ExchangeRate` / `fx_quote` entity carrying (base, quote, rate, provider, valid_at), as JSR 354 models it.
@@ -116,6 +118,7 @@ booking.fx_rate, booking.fx_rate_source, booking.fx_rate_as_of = (
 - A row holds only a reporting-currency figure: `amount_usd DECIMAL` (or a bare `amount` in a single house currency) with no `original_amount` / `original_currency` / `source_currency` columns.
 - Ingestion that converts on write and discards the input: `row.amount = convert(payload.amount, payload.currency, BASE)` then only `row.amount` is persisted; the payload currency and amount are dropped.
 - Python: an ORM model / `dataclass` / `TypedDict` with only `amount_usd` (or a bare `amount`) and no `original_amount` / `original_currency` field; an ingest function that does `row.amount = convert(payload["amount"], payload["currency"], BASE)` and drops `payload["currency"]`; a refund path that reconverts the stored base amount back to the customer currency instead of reading a retained original.
+- Java: a JPA `@Entity` (or DTO) with only `amountUsd` / a bare `amount` and no `originalAmount`/`originalCurrency` field; an ingest method doing `row.setAmount(convert(payload.getAmount(), payload.getCurrency(), BASE))` that drops the payload currency; a refund path reconverting the stored base amount instead of reading a retained original.
 - A `currency` column that is constant (always 'USD') across a table that clearly handles foreign payments, indicating conversion happened before storage.
 - Re-conversion performed from the stored converted value back to a foreign currency for display or refund (converted -> foreign), stacking a second rounding on an already-rounded number instead of using the retained original.
 - Refund, chargeback, or reversal logic that recomputes the original charge amount via FX instead of reading a stored original amount.
@@ -201,6 +204,20 @@ def total_by_currency(txns: list[Money]) -> dict[str, Decimal]:
     for m in txns:                       # never sum across currencies into one number
         buckets[m.currency] = buckets.get(m.currency, Decimal("0")) + m.amount
     return buckets
+```
+
+```java
+// Java (JSR 354 / MonetaryAmount): the type carries the currency and guards mismatch.
+// Its comparison methods throw MonetaryException "if the amount's currency is not
+// equal to the currency of this instance", so cross-currency logic cannot pass silently.
+MonetaryAmount usd = Money.of(10, "USD");
+MonetaryAmount eur = Money.of(10, "EUR");
+usd.isGreaterThan(eur);                 // throws MonetaryException (different currency)
+
+// aggregate per currency (CurrencyUnit key), never sum across into one number
+Map<CurrencyUnit, MonetaryAmount> byCurrency = txns.stream()
+    .collect(Collectors.groupingBy(MonetaryAmount::getCurrency,
+             Collectors.reducing(null, m -> m, (a, b) -> a == null ? b : a.add(b))));
 ```
 
 **False positives**
