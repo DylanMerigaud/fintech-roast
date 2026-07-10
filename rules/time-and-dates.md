@@ -38,6 +38,14 @@ biz_zone = ZoneInfo(account.business_zone)       # e.g. "America/New_York", data
 period = now.astimezone(biz_zone).strftime("%Y-%m")   # the statement month is a wall-clock concept
 ```
 
+```java
+// Java: store the instant, derive the period in the account's business zone (never LocalDateTime.now()).
+Instant now = Instant.now();                                 // a point on the timeline, persist this
+ZoneId bizZone = ZoneId.of(account.getBusinessZone());       // "America/New_York", data on the account
+YearMonth period = YearMonth.from(now.atZone(bizZone));      // the statement month is wall-clock, in the biz zone
+// LocalDateTime.now() has no zone: it cannot name an instant and silently uses the server's clock.
+```
+
 **False positives**
 
 - The whole system is genuinely single-zone by design (one jurisdiction, one exchange, one accounting calendar) and that zone is pinned explicitly and enforced, not inherited from the host locale.
@@ -51,6 +59,7 @@ period = now.astimezone(biz_zone).strftime("%Y-%m")   # the statement month is a
 3. [Date - JavaScript | MDN](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date) (Mozilla MDN Web Docs)
 4. [Noda Time: Core concepts](https://nodatime.org/2.4.x/userguide/concepts) (Noda Time, Jon Skeet et al.)
 5. [datetime, Basic date and time types](https://docs.python.org/3/library/datetime.html) (Python Software Foundation)
+6. [java.time package summary (Instant, LocalDateTime, ZonedDateTime)](https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/time/package-summary.html) (Oracle)
 
 ## TIM-2: DST-naive day arithmetic (86400 s per day, epoch-ms division)
 
@@ -85,6 +94,14 @@ for accrual_day in (invoice.start + timedelta(days=n) for n in range((invoice.en
     balance += principal * daily_rate                    # iterate calendar days, do not pro-rate by seconds
 ```
 
+```java
+// Java: count and add days as a calendar amount (Period), not a fixed Duration / epoch divide.
+long daysOverdue = ChronoUnit.DAYS.between(invoice.getDueDate(), LocalDate.now(bizZone));  // LocalDate diff
+
+ZonedDateTime nextDay = day.plusDays(1);                 // Period-based: keeps the wall-clock across DST
+// wrong: day.plus(Duration.ofDays(1)) adds exactly 24h, landing on the wrong hour at a DST transition
+```
+
 **False positives**
 
 - You genuinely want elapsed physical time (SLA seconds, latency, rate limits, TTLs, token expiry): 86400 s per day is correct because you mean 24 hours, not a calendar day.
@@ -97,6 +114,7 @@ for accrual_day in (invoice.start + timedelta(days=n) for n in range((invoice.en
 2. [Date.prototype.getTimezoneOffset() | MDN](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/getTimezoneOffset) (Mozilla MDN Web Docs)
 3. [Patriot Missile Defense: Software Problem Led to System Failure at Dhahran, Saudi Arabia (GAO IMTEC-92-26)](https://www.gao.gov/products/imtec-92-26) (U.S. General Accounting Office)
 4. [The Patriot Missile Failure](https://www-users.cse.umn.edu/~arnold/disasters/patriot.html) (Douglas N. Arnold, University of Minnesota)
+5. [java.time package summary (Period versus Duration)](https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/time/package-summary.html) (Oracle)
 
 ## TIM-3: Ambiguous billing/statement period boundaries and month-end clamping
 
@@ -139,6 +157,17 @@ last_day = calendar.monthrange(year, month)[1]       # 28/29/30/31
 anchor = date(year, month, min(day_of_month, last_day))
 ```
 
+```java
+// Java: half-open period test, and month rollover that clamps (java.time already clamps).
+boolean inPeriod = !ts.isBefore(periodStart) && ts.isBefore(nextPeriodStart);  // [start, next), never BETWEEN
+
+// LocalDate.plusMonths clamps Jan 31 + 1 month to Feb 28/29 (docs: last valid day), not overflow.
+LocalDate nextStart = periodStart.plusMonths(1);
+// explicit anchor: clamp the stored dayOfMonth to the target month's length.
+YearMonth ym = YearMonth.of(year, month);
+LocalDate anchor = ym.atDay(Math.min(dayOfMonth, ym.lengthOfMonth()));   // 28/29/30/31
+```
+
 **False positives**
 
 - `BETWEEN` (or a closed interval) on a whole-day date-only column where the next period starts on a strictly later day and boundaries cannot collide, so inclusivity is unambiguous.
@@ -149,6 +178,7 @@ anchor = date(year, month, min(day_of_month, last_day))
 
 1. [Set the subscription billing renewal date | Stripe Documentation](https://docs.stripe.com/billing/subscriptions/billing-cycle) (Stripe)
 2. [java.time package summary (Java SE 21)](https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/time/package-summary.html) (Oracle)
+3. [java.time.LocalDate.plusMonths (day-of-month clamping)](https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/time/LocalDate.html) (Oracle)
 
 ## TIM-4: Interest day-count convention ignored or hardcoded
 
