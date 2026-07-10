@@ -11,6 +11,7 @@ Part of the [fintech-roast](../README.md) rulebook. See [README.md](README.md) f
 - A webhook/callback HTTP route (Express/Fastify/Flask/Django/Rails/Spring controller) that runs a money side effect (capture, refund, credit balance, fulfill order, send payout) directly in the handler body with no lookup of an already-processed marker first.
 - Python: a Flask/FastAPI/Django webhook route (`@app.route('/webhooks', methods=['POST'])`, `@app.post(...)`, a `def stripe_webhook(request)` view) that calls `stripe.PaymentIntent.capture(...)`, credits a balance, or enqueues fulfillment straight from the parsed `event['data']['object']` with no prior `select(...).where(ProcessedEvent.event_id == event['id'])` (SQLAlchemy) or `ProcessedEvent.objects.filter(event_id=...).exists()` (Django) guard.
 - No table or store keyed on the provider event id (Stripe `event.id` / `evt_...`, Adyen `pspReference` plus `eventCode`, PayPal `id`) that is consulted before the side effect. Grep for the handler reading `event.type`/`eventCode`/`resource.type` but never SELECTing or INSERTing an `event_id`/`webhook_id` dedup row.
+- Java: a Spring `@PostMapping("/webhooks")` controller (or `@RestController` method) that captures a charge, credits a balance, or enqueues fulfillment straight from the deserialized event with no prior `processedEventRepository.existsById(event.getId())` / marker insert, and no `@Transactional` wrapping the marker and the side effect together.
 - Handler logic assumes ordering: `if event.type == 'x' then set status = ...` overwriting later state, or code that treats `payment_intent.succeeded` as final without guarding against a later `.canceled`/`.refunded` arriving first or twice.
 - Dedup check and side effect not in one transaction: an `INSERT INTO processed_events` (or Redis `SETNX`) committed separately from, or after, the charge/DB mutation, so a crash between them re-runs the effect.
 - Signature verified but no idempotency: presence of `stripe.webhooks.constructEvent` / `hmac` verification with the effect immediately following and no processed-id guard.
@@ -42,6 +43,19 @@ def handle_webhook(event):
     return ("", 200)
 ```
 
+```java
+// Java (Spring): insert the marker and run the effect in ONE transaction.
+// ProcessedEvent has @Id String eventId (its PK is the unique dedup key, IDE-4 backstop).
+@PostMapping("/webhooks")
+@Transactional
+public ResponseEntity<Void> handle(@RequestBody Event event) {
+    if (processedEvents.existsById(event.getId())) return ResponseEntity.ok().build();  // already done
+    processedEvents.save(new ProcessedEvent(event.getId()));   // conflict on retry rolls the tx back
+    applyMoneySideEffect(event);                               // commits atomically with the marker
+    return ResponseEntity.ok().build();
+}
+```
+
 **False positives**
 
 - Handlers that only read (log the event, emit a metric, invalidate a cache, forward to an internal queue that is itself idempotent) have no money side effect to double-apply, so a missing event-id dedup is acceptable.
@@ -64,6 +78,7 @@ def handle_webhook(event):
 - A POST to a payment provider that moves money (`stripe.charges/paymentIntents/refunds/transfers/payouts.create`, `adyen /payments`, PayPal capture, a bank/ACH transfer call) with no idempotency key in the request options or headers. Grep for `.create(` / `POST /payments` without an adjacent `idempotencyKey` / `Idempotency-Key` / `idempotency-key`.
 - Python: `stripe.PaymentIntent.create(...)` / `stripe.Refund.create(...)` / `stripe.Transfer.create(...)` with no `idempotency_key=` argument, or a raw `requests.post(url, json=...)` / `httpx.post(...)` to a money endpoint with no `Idempotency-Key` header. A `@retry` from `tenacity` (or a manual `for attempt in range(...)` loop) wrapping such a call so it resends on timeout/5xx without a stable key threaded through.
 - A retry wrapper, `axios-retry`, `tenacity`, resilience4j, or a message-queue redelivery around a money call that resends on timeout/5xx without threading a stable key through, so each attempt is a fresh operation.
+- Java: a `RestTemplate`/`WebClient` POST (or `HttpRequest`) to a money endpoint with no `Idempotency-Key` header, or `PaymentIntent.create(params)` (stripe-java) with no `RequestOptions` idempotency key, especially wrapped in `@Retryable`/resilience4j that resends on timeout without a stable key, or a key generated with `UUID.randomUUID()` inside the retry rather than once per operation.
 - An idempotency key that is regenerated per attempt (`uuid4()` computed inside the retry loop or per HTTP send) instead of once per logical operation, defeating the purpose.
 - A key derived from something non-unique or time-based (`now()`, a shared cart id reused across distinct charges) so two different operations collide, or so a legitimately different second charge is silently deduped to the first.
 - Key held only in process memory and not persisted with the operation, so a crash-and-retry after restart cannot reuse the same key.
@@ -91,6 +106,20 @@ def charge():
         idempotency_key=key,
     )
 # raw HTTP equivalent: requests.post(url, json=body, headers={"Idempotency-Key": key})
+```
+
+```java
+// Java: mint the key ONCE per operation and persist it, then reuse it on every retry.
+String key = operation.getIdempotencyKey();      // loaded/minted once, survives a restart
+if (key == null) { key = UUID.randomUUID().toString(); persistKey(operation.getId(), key); }
+
+@Retryable(retryFor = IOException.class)          // resends the SAME key + same body on timeout
+ResponseEntity<Charge> charge(String key) {
+    return webClient.post().uri("/payments")
+        .header("Idempotency-Key", key)           // provider replays the first result
+        .bodyValue(body).retrieve().toEntity(Charge.class).block();
+}
+// stripe-java equivalent: PaymentIntent.create(params, RequestOptions.builder().setIdempotencyKey(key).build())
 ```
 
 **False positives**
@@ -188,6 +217,7 @@ class Account {
 - A table storing a provider identifier (`event_id`, `payment_intent_id`, `charge_id`, `psp_reference`, `idempotency_key`, `external_ref`, `transaction_id`) whose DDL has no `UNIQUE` constraint or unique index on that column. Grep the schema/migrations for the column present but no `UNIQUE`/`CREATE UNIQUE INDEX`/`ADD CONSTRAINT ... UNIQUE`.
 - Dedup enforced only in application code: `SELECT ... WHERE event_id = ?` followed by a conditional `INSERT`, with nothing at the DB level, so two concurrent requests both see no row and both insert (a check-then-insert TOCTOU).
 - Python: a SQLAlchemy `Column("event_id", String)` or a Django `event_id = models.CharField(...)` with no `unique=True` / `UniqueConstraint`, backing a `if not session.query(...).filter_by(event_id=...).first(): session.add(...)` (or Django `if not ...objects.filter(event_id=...).exists():`) check-then-insert that races under concurrency.
+- Java/JPA: a `@Column String eventId` (or `pspReference`) with no `@Column(unique = true)` and no `@Table(uniqueConstraints = @UniqueConstraint(...))` (nor `@NaturalId`), backing a `if (!repo.existsByEventId(id)) repo.save(...)` check-then-insert that races, with no catch of the resulting `DataIntegrityViolationException` on the losing thread.
 - Nullable external-reference column used for dedup: `event_id TEXT` without `NOT NULL`, allowing multiple NULLs that a unique index does not collapse.
 - Inserts of provider records with no `ON CONFLICT` / `INSERT IGNORE` / `MERGE` and no handling of a unique-violation error (e.g. Postgres SQLSTATE 23505), implying duplicates are simply not caught if the app-level check races.
 - Wrong uniqueness grain: a unique key on only part of the natural identity (e.g. `pspReference` alone when Adyen dedup requires `pspReference` plus `eventCode`, or a single global key that should be scoped per account as in `(user_id, idempotency_key)`).
@@ -199,7 +229,21 @@ Application-level dedup checks are a check-then-act that races: two concurrent d
 
 **Fix**
 
-Put a `UNIQUE NOT NULL` constraint on the external reference at its correct grain and let the database be the final arbiter: `event_id TEXT NOT NULL UNIQUE`, or for scoped keys a composite `UNIQUE (account_id, idempotency_key)` (Brandur uses `(user_id, idempotency_key)` so a key is unique per account), or `UNIQUE (psp_reference, event_code)` for Adyen. Match the grain to the provider's own duplicate definition. Then insert with `INSERT ... ON CONFLICT (event_id) DO NOTHING` (which PostgreSQL documents as simply avoiding the insert as its alternative action) and treat a zero-row / conflict result as "already processed, skip the side effect." This makes the constraint the last line of defense behind the application check (IDE-1) and the outbound idempotency key (IDE-2): even if both of those miss, the database physically cannot store the duplicate. In Python, declare the constraint on the model itself (SQLAlchemy `Column("event_id", String, nullable=False, unique=True)` or `UniqueConstraint("account_id", "idempotency_key")`; Django `models.UniqueConstraint(fields=["account_id", "idempotency_key"], name=...)`) and let the driver surface the conflict via `on_conflict_do_nothing()` rather than catching `IntegrityError` after the fact.
+Put a `UNIQUE NOT NULL` constraint on the external reference at its correct grain and let the database be the final arbiter: `event_id TEXT NOT NULL UNIQUE`, or for scoped keys a composite `UNIQUE (account_id, idempotency_key)` (Brandur uses `(user_id, idempotency_key)` so a key is unique per account), or `UNIQUE (psp_reference, event_code)` for Adyen. Match the grain to the provider's own duplicate definition. Then insert with `INSERT ... ON CONFLICT (event_id) DO NOTHING` (which PostgreSQL documents as simply avoiding the insert as its alternative action) and treat a zero-row / conflict result as "already processed, skip the side effect." This makes the constraint the last line of defense behind the application check (IDE-1) and the outbound idempotency key (IDE-2): even if both of those miss, the database physically cannot store the duplicate. In Python, declare the constraint on the model itself (SQLAlchemy `Column("event_id", String, nullable=False, unique=True)` or `UniqueConstraint("account_id", "idempotency_key")`; Django `models.UniqueConstraint(fields=["account_id", "idempotency_key"], name=...)`) and let the driver surface the conflict via `on_conflict_do_nothing()` rather than catching `IntegrityError` after the fact. In JPA, put the constraint on the entity (`@Column(unique = true)` or a composite `@Table(uniqueConstraints = @UniqueConstraint(columnNames = {...}))`) so DDL generation and the database both enforce it, and treat the resulting `DataIntegrityViolationException` on `save` as "already processed" instead of relying on an `existsBy...` check.
+
+```java
+@Entity
+@Table(name = "processed_events",
+       uniqueConstraints = @UniqueConstraint(columnNames = {"account_id", "idempotency_key"}))
+class ProcessedEvent {
+    @Column(nullable = false, unique = true) String eventId;   // DB is the final arbiter
+    String accountId;
+    String idempotencyKey;
+}
+// insert, let the constraint decide; do not gate on a racy existsByEventId(...) check
+try { repo.saveAndFlush(new ProcessedEvent(id)); applyEffect(); }
+catch (DataIntegrityViolationException dup) { /* already processed: skip the side effect */ }
+```
 
 **False positives**
 
@@ -213,3 +257,4 @@ Put a `UNIQUE NOT NULL` constraint on the external reference at its correct grai
 1. [Hidden dangers of duplicate key violations in PostgreSQL and how to avoid them](https://aws.amazon.com/blogs/database/hidden-dangers-of-duplicate-key-violations-in-postgresql-and-how-to-avoid-them/) (Amazon Web Services)
 2. [INSERT (ON CONFLICT clause)](https://www.postgresql.org/docs/current/sql-insert.html) (PostgreSQL Global Development Group)
 3. [Implementing Stripe-like idempotency keys in Postgres](https://brandur.org/idempotency-keys) (Brandur Leach)
+4. [Jakarta Persistence 3.1: UniqueConstraint annotation](https://jakarta.ee/specifications/persistence/3.1/apidocs/jakarta.persistence/jakarta/persistence/uniqueconstraint) (Eclipse Foundation, Jakarta EE)
