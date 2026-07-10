@@ -1,8 +1,12 @@
 name: release
 
 # Publishes the rulebook package to npm when a version tag is pushed.
-# Requires an NPM_TOKEN repository secret (a granular or automation token with
-# publish rights). Tag and package.json version must match, e.g.:
+# Uses npm Trusted Publishing (OIDC): no NPM_TOKEN secret. Instead, configure this
+# repo + workflow as a trusted publisher on npmjs.com once
+# (package settings -> Publishing access -> Trusted Publisher: GitHub Actions,
+#  repo DylanMerigaud/fintech-roast, workflow release.yml). npm then trusts the
+# GitHub OIDC identity (id-token: write below) and provenance is automatic.
+# Tag and package.json version must match, e.g.:
 #   npm version patch   # bumps package.json and creates the tag
 #   git push --follow-tags
 on:
@@ -15,13 +19,15 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write # for npm provenance
+      id-token: write # npm Trusted Publishing (OIDC)
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
           registry-url: "https://registry.npmjs.org"
+      - name: Upgrade npm (OIDC trusted publishing needs npm >= 11.5.1)
+        run: npm install -g npm@latest
       - name: Check tag matches package.json version
         run: |
           TAG="${GITHUB_REF_NAME#v}"
@@ -31,5 +37,3 @@ jobs:
             exit 1
           fi
       - run: npm publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
