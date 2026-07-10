@@ -66,6 +66,16 @@ NUMERIC/DECIMAL is exact only within its declared precision (total significant d
 
 Choose scale from the currency ISO 4217 minor unit (2 for USD/EUR, 0 for JPY, 3 for BHD/KWD) and add guard digits for intermediate math where unit prices, per-share values, tax, or interest need sub-minor precision. A common pattern is a wider working type (for example NUMERIC(19,4) or (23,8)) for computation, rounded to the currency scale only at the final persisted amount. Size precision for the largest accumulator the column will ever hold, not a single transaction. In BigDecimal/Decimal code set scale and RoundingMode explicitly on every division and before persistence rather than relying on defaults (BigDecimal division of a non-terminating quotient throws ArithmeticException when no rounding mode is given). Document the chosen (precision, scale) and the rounding rule next to the column.
 
+```java
+// wrong: no rounding mode, throws ArithmeticException on a non-terminating quotient
+BigDecimal perUnit = total.divide(qty);
+// right: explicit scale + mode, with guard digits for intermediate math
+BigDecimal perUnit = total.divide(qty, 4, RoundingMode.HALF_UP);
+
+@Column(precision = 19, scale = 4)   // size precision for the largest accumulator, not one row
+private BigDecimal runningTotal;
+```
+
 **False positives**
 
 - A deliberately wide working/intermediate type (NUMERIC(19,4), (30,15)) rounded down to the currency scale only at the final stored amount is correct, not a bug.
@@ -92,6 +102,7 @@ Choose scale from the currency ISO 4217 minor unit (2 for USD/EUR, 0 for JPY, 3 
 - Mixed conventions in one codebase: some tables store cents (1999), others store decimal dollars (19.99), then joined or summed together.
 - Hardcoded `/100` that assumes 2 decimals, breaking zero- and three-decimal currencies (see STO-5).
 - Money passed as a raw int64/number across a service or JSON boundary with no accompanying scale/exponent field.
+- Java: a bare `long`/`int` field named `amountCents` (or `long amount` in minor units) with the unit only in the name, instead of a Money value type (Joda-Money `Money`, or a domain wrapper) that carries the unit.
 
 **Why it breaks**
 
@@ -115,6 +126,12 @@ Cents = NewType("Cents", int)
 def to_cents(major: Decimal) -> Cents: return Cents(int((major * 100).to_integral_value()))
 ```
 
+```java
+// Java: a Money value type carries amount + currency, so a bare long can never be mistaken for a unit
+Money price = Money.of(CurrencyUnit.USD, new BigDecimal("19.99"));  // org.joda.money
+long minor = price.getAmountMinorLong();                            // 1999, only at the boundary
+```
+
 Pick one convention per system, document it, and pin the asset scale per ledger/currency (TigerBeetle: map the smallest useful unit to 1, and treat that scale as immutable). Across service and JSON boundaries, send amount plus currency plus minor-unit exponent together rather than a naked integer. Prefer a decimal type when the app does not clearly benefit from integer minor units.
 
 **False positives**
@@ -129,6 +146,7 @@ Pick one convention per system, document it, and pin the asset scale per ledger/
 1. [TigerBeetle Docs: Data Modeling](https://docs.tigerbeetle.com/coding/data-modeling/) (TigerBeetle)
 2. [Floats Don't Work For Storing Cents](https://www.moderntreasury.com/journal/floats-dont-work-for-storing-cents) (Modern Treasury)
 3. [Money (Patterns of Enterprise Application Architecture)](https://martinfowler.com/eaaCatalog/money.html) (Martin Fowler)
+4. [Joda-Money: Money and CurrencyUnit](https://www.joda.org/joda-money/) (Joda.org)
 
 ## STO-4: Amounts stored or passed around without their currency
 
@@ -142,6 +160,7 @@ Pick one convention per system, document it, and pin the asset scale per ledger/
 - Summing or comparing amounts from different rows/tables without checking they share a currency.
 - The PostgreSQL `money` type used as the currency-bearing solution (it is not; its format comes from the `lc_monetary` locale, not per value).
 - Multi-currency features (FX, international payouts, marketplaces) built on single-currency amount columns.
+- Java: a `BigDecimal amount` entity field or DTO with no adjacent currency (a `CurrencyUnit`, a `Currency`, or a `currencyCode` column), instead of a Money value type that binds amount and currency into one object (Joda-Money `Money` plus `CurrencyUnit`).
 
 **Why it breaks**
 
@@ -217,6 +236,7 @@ BigDecimal amount = major.setScale(digits, RoundingMode.HALF_UP);    // never a 
 - Accumulators (SUM over many rows, running totals, GMV, batch settlement) narrower than the sum they can reach, even if each row fits.
 - Fixed-width wire/price formats (price * 10000 packed into a 4-byte field) without a documented ceiling.
 - Arithmetic that widens then narrows: `a * b` computed in a 32-bit type before assignment, silently overflowing the intermediate.
+- Java: `int`/`long` minor-unit sums or products computed with plain `+`/`*` (which wrap silently on overflow, Java throws nothing) instead of `Math.addExact`/`Math.multiplyExact`, or a narrowing `(int)` cast / `Math.toIntExact` omitted where a `long` total is stored back into an `int` column.
 - JSON amounts round-tripped through a JS number without BigInt or a string, losing precision above 2^53.
 - Python `int` is arbitrary precision so the amount never overflows in memory, which hides the risk: it resurfaces at the boundary, a wide value written to a 32/64-bit DB column, or serialized to JSON and read back by a JavaScript consumer above 2^53.
 
@@ -226,7 +246,13 @@ Every numeric type has a ceiling, and money in minor units reaches it faster tha
 
 **Fix**
 
-Size the type for the largest total the system can ever reach in minor units, including accumulators, not just per-transaction values. Use 64-bit integers or exact decimals (BIGINT, int64, Java long/BigDecimal, Python `int` which is unbounded), and in JavaScript use BigInt or a decimal library and keep large amounts out of Number (and out of JSON numbers, serialize as strings or BigInt). Prefer arbitrary-precision integers (TigerBeetle uses 128-bit) for ledgers that must never overflow. Audit widening/narrowing in arithmetic so an intermediate product does not overflow a 32-bit temporary. Treat the ceiling as a design decision and document the headroom.
+Size the type for the largest total the system can ever reach in minor units, including accumulators, not just per-transaction values. Use 64-bit integers or exact decimals (BIGINT, int64, Java long/BigDecimal, Python `int` which is unbounded), and in JavaScript use BigInt or a decimal library and keep large amounts out of Number (and out of JSON numbers, serialize as strings or BigInt). Prefer arbitrary-precision integers (TigerBeetle uses 128-bit) for ledgers that must never overflow. Audit widening/narrowing in arithmetic so an intermediate product does not overflow a 32-bit temporary. In Java, use `Math.addExact`/`Math.multiplyExact` (and `Math.toIntExact` at a narrowing boundary) so an overflow throws `ArithmeticException` instead of silently wrapping, or hold the amount in `BigDecimal`/`BigInteger`. Treat the ceiling as a design decision and document the headroom.
+
+```java
+long total = Math.addExact(a, b);        // throws ArithmeticException on overflow, not wrap
+long scaled = Math.multiplyExact(price, 10_000L);
+int col = Math.toIntExact(total);        // throws if `total` does not fit an int column
+```
 
 **False positives**
 
@@ -240,6 +266,7 @@ Size the type for the largest total the system can ever reach in minor units, in
 1. [MDN: Number.MAX_SAFE_INTEGER](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/MAX_SAFE_INTEGER) (MDN Web Docs, Mozilla)
 2. [TigerBeetle Docs: Data Modeling](https://docs.tigerbeetle.com/coding/data-modeling/) (TigerBeetle)
 3. [Nasdaq halts Berkshire Hathaway price feed over 32-bit limit](https://www.theregister.com/2021/05/07/bug_warren_buffett_rollover_nasdaq/) (The Register)
+4. [Java SE 21 java.lang.Math (addExact, multiplyExact, toIntExact)](https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/Math.html) (Oracle)
 
 ## STO-7: Exact-decimal money constructed from a binary float
 
