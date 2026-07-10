@@ -1,6 +1,6 @@
 {
   "fixture": "eval/fixture-py",
-  "notes": "Deliberately-buggy Python billing fixture. Computation domains only so far (STO, ROU, FX, TIM, TAX, AGG). Stateful domains (IDE webhooks and balances, LED ledger, API serialization, DB schema, TST tests) are pending in a later pass, so this key is partial and recall is measured against the 20 bugs below. Green by design: pytest passes because every fixture input is round-number and single-currency, so the buggy path and the correct path produce the same output.",
+  "notes": "Deliberately-buggy Python billing fixture, full coverage across all 10 domains (STO, ROU, IDE, LED, FX, TIM, AGG, TAX, API, TST). Green by design: pytest passes (31 tests) because every fixture input is round-number and single-currency and every test exercises a happy path (one webhook delivery, one sequential balance update, no fractional cents), so the planted bugs stay dormant. Mirrors the TypeScript fixture at eval/fixture.",
   "planted": [
     {"key": "P01", "rule": "API-3", "files": ["fixture-py/money.py"], "note": "parse_amount coerces a money string with float(input) instead of Decimal, inexact double on money input"},
     {"key": "P02", "rule": "STO-1", "files": ["fixture-py/money.py"], "note": "money flows through Python float everywhere (parse_amount returns float, round_money operates on float) instead of Decimal or integer minor units"},
@@ -21,6 +21,23 @@
     {"key": "P17", "rule": "TIM-4", "files": ["fixture-py/interest.py"], "note": "accrued_interest uses a hardcoded annual_rate / 365 daily rate with no day-count convention"},
     {"key": "P18", "rule": "TIM-3", "files": ["fixture-py/interest.py"], "note": "transactions_in_period treats both endpoints as inclusive, so a transaction on a shared boundary is double-counted across consecutive periods"},
     {"key": "P19", "rule": "AGG-1", "files": ["fixture-py/reports.py"], "note": "sum_amounts totals money by adding raw Python floats in a loop, accumulating binary-float error instead of Decimal"},
-    {"key": "P20", "rule": "AGG-3", "files": ["fixture-py/reports.py"], "note": "total_all_pages paginates with limit and offset over live data, so inserts or deletes between fetches make the aggregate drift"}
+    {"key": "P20", "rule": "AGG-3", "files": ["fixture-py/reports.py"], "note": "total_all_pages paginates with limit and offset over live data, so inserts or deletes between fetches make the aggregate drift"},
+    {"key": "P21", "rule": "STO-1", "files": ["fixture-py/db/schema.sql"], "note": "money columns typed DOUBLE PRECISION and REAL (subtotal, tax, total, unit_price, payment amount, webhook amount, ledger amount)"},
+    {"key": "P22", "rule": "STO-2", "files": ["fixture-py/db/schema.sql"], "note": "accounts.balance is NUMERIC(6,2), caps at 9999.99 so a real running balance overflows"},
+    {"key": "P23", "rule": "STO-4", "files": ["fixture-py/db/schema.sql"], "note": "no currency column anywhere amounts are stored (accounts, invoices, payments, webhook_events, ledger_entries)"},
+    {"key": "P24", "rule": "IDE-4", "files": ["fixture-py/db/schema.sql"], "note": "payments.external_ref and webhook_events.event_id have no UNIQUE constraint, so duplicate provider refs and event ids insert fine"},
+    {"key": "P25", "rule": "TIM-1", "files": ["fixture-py/db/schema.sql"], "note": "financial instants typed TIMESTAMP without time zone (issued_at, received_at, created_at)"},
+    {"key": "P26", "rule": "IDE-1", "files": ["fixture-py/webhooks.py"], "note": "handle_payment_succeeded credits with no event-id dedup before the side effect, a redelivered webhook double-credits"},
+    {"key": "P27", "rule": "IDE-2", "files": ["fixture-py/webhooks.py"], "note": "charge_customer retries the POST to charges with no idempotency key, a timed-out-but-successful charge is resent"},
+    {"key": "P28", "rule": "IDE-3", "files": ["fixture-py/store.py"], "note": "credit_account and debit_account do read-modify-write on the balance with no row lock or atomic UPDATE, lost update under concurrency"},
+    {"key": "P29", "rule": "LED-1", "files": ["fixture-py/ledger.py"], "note": "correct_entry mutates the posted entry amount in place instead of appending a reversing entry"},
+    {"key": "P30", "rule": "LED-2", "files": ["fixture-py/ledger.py"], "note": "post_entry records a single signed leg, no paired debit and credit, no shared transaction id, debits equal credits is unenforceable"},
+    {"key": "P31", "rule": "LED-3", "files": ["fixture-py/ledger.py"], "note": "the account balance is a cached mutable column incremented separately, never derived from or reconciled against the entries"},
+    {"key": "P32", "rule": "LED-4", "files": ["fixture-py/ledger.py"], "note": "entries and corrections carry no actor, reason, or timestamp and no append-only history, so money moves leave no audit trail"},
+    {"key": "P33", "rule": "API-1", "files": ["fixture-py/api.py"], "note": "invoice_response serializes total as a bare JSON number (float via from_minor_units) and drops the currency"},
+    {"key": "P34", "rule": "API-4", "files": ["fixture-py/api.py"], "note": "invoice_response returns decimal dollars while account_balance_response returns integer cents for the same kind of value, no canonical money shape"},
+    {"key": "P35", "rule": "TST-1", "files": ["fixture-py/test_stateful.py"], "note": "no property-based tests, no Hypothesis given, invariants like credited-once and balance equals sum of entries are never generated against"},
+    {"key": "P36", "rule": "TST-2", "files": ["fixture-py/test_stateful.py"], "note": "every fixture amount is round (100, 50, 60, 40, 250.00, 10000), no fractional-cent input so no rounding decision is exercised"},
+    {"key": "P37", "rule": "TST-3", "files": ["fixture-py/test_stateful.py"], "note": "single happy currency USD, no JPY or BHD zero- or three-decimal case, no negative amount, refund, or reversal"}
   ]
 }
