@@ -11,6 +11,7 @@ Part of the [fintech-roast](../README.md) rulebook. See [README.md](README.md) f
 - SQL that targets a financial/ledger table with UPDATE or DELETE: patterns like `UPDATE ... ledger_entr|journal|posting|transaction|movement` and `DELETE FROM ... ledger|journal|posting|entr`, especially setting `amount`, `debit`, `credit`, `account_id`, or `currency` on an already-posted row.
 - ORM save/update or destroy on a posted-entry model: `ledgerEntry.update(...)` / `.save()` after mutating a persisted entry, `repo.delete(entry)`, Prisma `prisma.ledgerEntry.update|delete`; Django `entry.save()` / `.delete()` / `.update()` on a posted queryset, SQLAlchemy `session.delete(entry)`; ActiveRecord `entry.update!` / `entry.destroy`; GORM `db.Save(&entry)` / `db.Delete(&entry)`.
 - Python specifically: `entry.amount = corrected; session.commit()` (SQLAlchemy) or `entry.amount = corrected; entry.save()` / `LedgerEntry.objects.filter(...).update(amount=...)` / `.delete()` (Django ORM) on a row whose `posted_at` is already set, on a void/refund/correction handler, instead of an append-only `session.add(reversing_entry)`.
+- Java/JPA: `ledgerEntryRepository.save(entry)` or `.delete(entry)` on an already-posted entry, or mutating a managed `@Entity` field (`entry.setAmount(corrected)`) inside a `@Transactional` method so Hibernate dirty-checking issues an UPDATE, on a void/refund/correction path, instead of `save(reversingEntry)`.
 - No enforcement that posted rows are immutable: no BEFORE UPDATE/DELETE trigger raising an exception, no policy/rule, no append-only table type, no CHECK or generated-column lock keyed on `posted_at` / `status='posted'`.
 - A correction path that edits the original row (recomputing `amount` in place, `UPDATE ... SET amount = corrected`) instead of inserting a new opposite (reversing) entry that references the original via `reverses_entry_id` / `original_entry_id`.
 - Hard-delete of transactions on a `void` / `cancel` / `refund` code path rather than posting a compensating entry: grep handlers named void/cancel/reverse that call delete or update on the entry table.
@@ -48,6 +49,16 @@ def correct_entry(session, wrong: LedgerEntry, corrected_amount):
         # note: NO wrong.amount = ...  and NO session.delete(wrong)
 ```
 
+```java
+// Java (Spring Data JPA): correct by APPENDING, never save() a mutated posted entry.
+@Transactional
+void correctEntry(LedgerEntry wrong, BigDecimal correctedAmount) {
+    ledger.save(LedgerEntry.reversal(wrong, wrong.getAmount().negate()));  // opposite, links to original
+    ledger.save(LedgerEntry.posting(wrong.getAccountId(), correctedAmount));
+    // no wrong.setAmount(...) (Hibernate would UPDATE it) and no ledger.delete(wrong)
+}
+```
+
 **False positives**
 
 - Rows still in a draft/pending/uncommitted state that the design explicitly allows to be edited or discarded before posting (a mutable staging area is legitimate; the invariant only binds once `posted_at` is set).
@@ -72,6 +83,7 @@ def correct_entry(session, wrong: LedgerEntry, corrected_amount):
 - A ledger/entries table missing the columns needed to express both legs: no `direction` / `side` (debit|credit) column, no `account_id` per leg, or entries not grouped under a shared `transaction_id` / `journal_id` that could be balanced.
 - Transfer code that debits the sender while the corresponding credit to the receiver is missing, conditional, or in a separate un-atomic step: grep handlers that touch a `from` balance without a matching `to` balance write inside the same transaction.
 - Python: a `def transfer(...)` that does a single `session.add(LedgerEntry(account_id=sender, amount=-amt))` (SQLAlchemy) or one `Account.objects.filter(pk=sender).update(balance=F("balance") - amt)` (Django) with no paired credit leg to the receiver in the same `session.begin()` / `transaction.atomic()` block, or an entries model whose columns cannot express two legs (no `direction`/`side`, no shared `transaction_id`).
+- Java/JPA: a `@Transactional void transfer(...)` that saves a single `LedgerEntry` for the sender (or one `@Modifying` UPDATE on the sender balance) with no paired credit leg to the receiver in the same transaction, or a `LedgerEntry` entity with no `direction`/`side` and no shared `transactionId` so two legs cannot be expressed.
 - No invariant asserting sum(debits) == sum(credits) per transaction and per currency: no CHECK, no post-commit assertion, no `SELECT SUM(CASE WHEN direction='debit' ...) = SUM(...credit...)` reconciliation, no test enforcing balanced journals.
 - Balances derived from a single running column with no offsetting account, so a create/refund/fee path can add or remove value with nothing on the other side (money created or destroyed).
 - External settlement account absent: fees, FX, rounding, or gateway movements booked to a user account with no corresponding revenue/clearing/suspense account, so totals across the system do not sum to zero.
@@ -122,6 +134,7 @@ def transfer(session, sender, receiver, amt, currency):
 
 - A mutable `balance` column on an account/wallet/user table written directly (`UPDATE accounts SET balance = balance + :amt`) as the source of truth, with no entries table it is provably a function of.
 - Python: a Django `balance = models.DecimalField(...)` / SQLAlchemy `Column("balance", Numeric)` mutated directly (`Account.objects.filter(pk=id).update(balance=F("balance") + amt)` or `acct.balance += amt; session.commit()`) as the authoritative figure, with no entries table it is a function of and no reconciliation query (`sum(credits) - sum(debits)` compared to the stored column) anywhere in the codebase.
+- Java/JPA: a `@Column BigDecimal balance` on an Account entity mutated directly (`acct.setBalance(acct.getBalance().add(amt))` + `save`, or a `@Modifying` balance UPDATE) as the authoritative figure, with no entries table it is a function of and no reconciliation query (`sum(credits) - sum(debits)` compared to the column) anywhere.
 - Balance mutation happening in a different transaction, service, or code path than the entry insert, so the two can diverge on partial failure, retry, or race: grep for a balance write not co-located with the entry write inside one DB transaction.
 - No reconciliation job: no query comparing the stored balance to sum(entries) per account, no `SELECT balance - (SUM(credits) - SUM(debits))` check, no drift alert crossing a tolerance, no scheduled sweep.
 - Balance read and balance acted-upon diverging (balance conflation): code that reads `available` but decrements `posted`, or authorizes against a cached figure that is not the ledger figure.
@@ -175,6 +188,7 @@ def reconcile(session, account_id, cached_balance, tolerance=0):
 - In-place UPDATEs to money fields with no history/versioning: an updatable financial table with no system-versioning, no history/shadow table, no append-only log, so a prior value is overwritten and gone.
 - Balance-affecting mutations routed around the ledger entirely: direct `UPDATE accounts SET balance` or admin scripts/console edits that leave no entry and no record of the operator or justification.
 - Python: a ledger/entry model (SQLAlchemy or Django) with no `created_by`/`actor_id`, `created_at`, and `reason`/`source` columns, or a `manage.py shell` / Django-admin / ad-hoc script that does `acct.balance = x; acct.save()` (or `.objects.update(balance=...)`) with no entry row capturing who ran it and why.
+- Java/JPA: a `LedgerEntry` entity with no `createdBy`/`actorId`, `createdAt` (`@CreatedBy`/`@CreatedDate` Spring Data auditing absent), and no `reason`/`source`, or a CommandLineRunner/admin service doing `acct.setBalance(x); save(acct)` with no entry capturing who ran it and why.
 - No immutable/tamper-evident history: no append-only entries table, event log, or ledger table; corrections that overwrite rather than append make it impossible to reconstruct how a balance was reached.
 - Manual adjustment / write-off / comp / chargeback paths that mutate money without recording the authorizing user and a linked reason code: grep admin/backoffice handlers that touch balances or entries.
 - Logging that exists but is non-durable or mutable for the audit purpose (plain app logs that rotate or are editable) rather than a persisted, queryable, tamper-resistant record tied to each money mutation.
