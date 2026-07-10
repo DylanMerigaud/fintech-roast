@@ -328,6 +328,55 @@
       "line": 15,
       "evidence": "public static final double SALES_TAX_RATE = 0.0825; rate held as a binary double, used in double multiply-then-round",
       "fix": "Hold the rate as integer basis points (825) or new BigDecimal(\"0.0825\") and do the math in BigDecimal or integer minor units."
+    },
+    {
+      "rule": "API-1",
+      "file": "eval/fixture-java/src/main/java/com/roastable/billing/Api.java",
+      "line": 42,
+      "evidence": "payload.put(\"balance\", balanceCents)",
+      "fix": "Serialize the balance as an integer minor-unit string plus currency, not a bare JSON number that can exceed 2^53."
+    },
+    {
+      "rule": "API-1",
+      "file": "eval/fixture-java/src/main/java/com/roastable/billing/Api.java",
+      "line": 34,
+      "evidence": "payload.put(\"total\", Money.fromMinorUnits(invoice.totalCents()))",
+      "fix": "Emit total as a decimal string or integer minor units with currency, not a double that serializes to a bare JSON number."
+    },
+    {
+      "rule": "API-3",
+      "file": "eval/fixture-java/src/main/java/com/roastable/billing/Money.java",
+      "line": 18,
+      "evidence": "return Double.parseDouble(input)",
+      "fix": "Validate a strict money grammar then build new BigDecimal(String), never Double.parseDouble on a request amount."
+    },
+    {
+      "rule": "API-4",
+      "file": "eval/fixture-java/src/main/java/com/roastable/billing/Money.java",
+      "line": 22,
+      "evidence": "Math.round(amount * 100); double amount vs long cents with no shared Money type or currency",
+      "fix": "Adopt one canonical Money shape (integer minor units plus ISO 4217 currency) across all DTOs and drop the ad hoc *100 bridge."
+    },
+    {
+      "rule": "TST-1",
+      "file": "eval/fixture-java/src/test/java/com/roastable/billing/SplitTest.java",
+      "line": 19,
+      "evidence": "splitProportionally(100, {1,1,2}) asserted to {25.0,25.0,50.0}, only evenly-dividing weights, no jqwik @Property/@ForAll anywhere",
+      "fix": "Add a jqwik @Property generating arbitrary totals and weight vectors and assert sum(parts) == total."
+    },
+    {
+      "rule": "TST-2",
+      "file": "eval/fixture-java/src/test/java/com/roastable/billing/InvoiceTest.java",
+      "line": 36,
+      "evidence": "invoiceTotal(lines, 10, 0.10) on subtotal 100 expects 99.0; round amount and 10 percent never produce a fractional cent, passes under floor/half-up/half-even alike",
+      "fix": "Use awkward amounts and a .xx5 tie (e.g. 8.375 percent of 19.99, split 100 three ways) and assert the specific RoundingMode."
+    },
+    {
+      "rule": "TST-3",
+      "file": "eval/fixture-java/src/test/java/com/roastable/billing/MoneyTest.java",
+      "line": 29,
+      "evidence": "toMinorUnits(100) expects 10000, only USD across the suite, no JPY 0-decimal or BHD 3-decimal case, no negative/refund amount, no boundary magnitude",
+      "fix": "Parameterize over a JPY/USD/BHD currency matrix, add a negative refund case and near-zero and near-Long-limit magnitudes."
     }
   ]
 }
