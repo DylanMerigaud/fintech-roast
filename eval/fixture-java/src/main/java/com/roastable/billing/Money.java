@@ -3,29 +3,38 @@ package com.roastable.billing;
 import java.math.BigDecimal;
 
 /**
- * Skeleton money value type for the fintech-roast Java fixture.
+ * Money primitives for the billing service.
  *
- * <p>This is the toolchain-proof skeleton only: a correct amount-plus-currency
- * record. The deliberately-buggy modules (planted across the 10 rule domains,
- * mirroring eval/fixture-py) are added in later steps. Nothing here is planted.
+ * <p>The rest of the billing code leans on these helpers, so whatever they get
+ * wrong quietly spreads everywhere downstream. Mirrors eval/fixture-py/money.py.
  */
-public record Money(BigDecimal amount, String currency) {
+public final class Money {
 
-    public Money {
-        if (amount == null) {
-            throw new IllegalArgumentException("amount is required");
-        }
-        if (currency == null || currency.isBlank()) {
-            throw new IllegalArgumentException("currency is required");
-        }
+    private Money() {
     }
 
-    /** Add two amounts of the same currency. Refuses a cross-currency add. */
-    public Money add(Money other) {
-        if (!currency.equals(other.currency)) {
-            throw new IllegalArgumentException(
-                    "cannot add " + currency + " to " + other.currency);
-        }
-        return new Money(amount.add(other.amount), currency);
+    /** Parse an amount coming off a request body into a number. */
+    public static double parseAmount(String input) {
+        return Double.parseDouble(input);
+    }
+
+    /** Turn a major-unit amount (dollars) into minor units (cents). */
+    public static long toMinorUnits(double amount) {
+        return Math.round(amount * 100);
+    }
+
+    /** Turn minor units (cents) back into a major-unit amount (dollars). */
+    public static double fromMinorUnits(long minor) {
+        return minor / 100.0;
+    }
+
+    /** Round a money value to two decimals for storage. */
+    public static double roundMoney(double value) {
+        return Math.round(value * 100) / 100.0;
+    }
+
+    /** Wrap a numeric amount in a BigDecimal so downstream math looks exact. */
+    public static BigDecimal toDecimal(double amount) {
+        return new BigDecimal(amount);
     }
 }
