@@ -1,0 +1,4 @@
+{"findings": [
+  {"rule": "AGG-1", "file": "eval/fixture-java/src/main/java/com/roastable/billing/Reports.java", "line": 27, "evidence": "double total = 0.0; total += amount over double[] amounts", "fix": "Accumulate money in BigDecimal (or sum long minor units), not a double accumulator."},
+  {"rule": "AGG-3", "file": "eval/fixture-java/src/main/java/com/roastable/billing/Reports.java", "line": 47, "evidence": "totalAllPages loops fetchPage.fetch(pageSize, offset) with offset += pageSize and total += sumAmounts(amounts) across pages", "fix": "Compute the total in one SELECT SUM query over a single snapshot, or keyset-paginate inside one repeatable-read transaction, not limit/offset page-then-add over live data."}
+]}

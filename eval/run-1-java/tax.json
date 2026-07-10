@@ -1,0 +1,5 @@
+{"findings": [
+  {"rule": "TAX-1", "file": "eval/fixture-java/src/main/java/com/roastable/billing/Tax.java", "line": 30, "evidence": "invoiceTaxByLines sums roundMoney(amount*rate) per line while invoiceTaxOnTotal rounds the total once", "fix": "Pick one configured rounding level and call the same helper on every path so sum(round(line)) and round(sum) cannot disagree by a cent."},
+  {"rule": "TAX-2", "file": "eval/fixture-java/src/main/java/com/roastable/billing/Tax.java", "line": 47, "evidence": "extractTaxFromGross: tax = roundMoney(gross * SALES_TAX_RATE) on an inclusive gross, rounded apart from net", "fix": "Back tax out of the gross: net = round(gross/(1+rate)); tax = gross - net, so net + tax == gross exactly."},
+  {"rule": "TAX-3", "file": "eval/fixture-java/src/main/java/com/roastable/billing/Tax.java", "line": 15, "evidence": "public static final double SALES_TAX_RATE = 0.0825; rate held as a binary double, used in double multiply-then-round", "fix": "Hold the rate as integer basis points (825) or new BigDecimal(\"0.0825\") and do the math in BigDecimal or integer minor units."}
+]}

@@ -1,0 +1,6 @@
+{"findings": [
+  {"rule": "LED-1", "file": "eval/fixture-java/src/main/java/com/roastable/billing/Ledger.java", "line": 44, "evidence": "entry.setAmount(newAmount); entries.save(entry);", "fix": "Leave the posted entry untouched and append a reversing entry plus a corrected entry, do not mutate and save."},
+  {"rule": "LED-2", "file": "eval/fixture-java/src/main/java/com/roastable/billing/Ledger.java", "line": 34, "evidence": "postEntry saves one signed leg after a single debit OR credit, no paired counter-leg", "fix": "Record two entries per movement sharing a transactionId, a debit and a credit, and assert sum(debit) == sum(credit) before commit."},
+  {"rule": "LED-3", "file": "eval/fixture-java/src/main/java/com/roastable/billing/Ledger.java", "line": 30, "evidence": "store.debitAccount / creditAccount mutate a cached balance directly, no reconciliation to entries", "fix": "Derive the balance by summing entries, or reconcile the stored balance against sum(entries) and alert on drift."},
+  {"rule": "LED-4", "file": "eval/fixture-java/src/main/java/com/roastable/billing/LedgerEntry.java", "line": 17, "evidence": "ledger_entries entity has no createdBy/actorId and no reason/source/idempotencyKey", "fix": "Add createdBy, reason/source, and an idempotency key so each money mutation records who moved money and why."}
+]}

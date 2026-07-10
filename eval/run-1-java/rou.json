@@ -1,0 +1,7 @@
+{"findings": [
+  {"rule": "ROU-1", "file": "eval/fixture-java/src/main/java/com/roastable/billing/Money.java", "line": 33, "evidence": "Math.round(value * 100) / 100.0", "fix": "Use BigDecimal.setScale(2, RoundingMode.HALF_UP) with an explicit mode, not Math.round on a double."},
+  {"rule": "ROU-1", "file": "eval/fixture-java/src/main/java/com/roastable/billing/Money.java", "line": 23, "evidence": "Math.round(amount * 100)", "fix": "Convert to minor units via BigDecimal with an explicit RoundingMode rather than Math.round on a binary float."},
+  {"rule": "ROU-2", "file": "eval/fixture-java/src/main/java/com/roastable/billing/Split.java", "line": 21, "evidence": "parts[i] = Money.roundMoney(total * weights[i] / weightSum) in a loop, no residual reconciliation", "fix": "Use largest-remainder allocation in integer minor units so sum(parts) == total by construction."},
+  {"rule": "ROU-3", "file": "eval/fixture-java/src/main/java/com/roastable/billing/Invoice.java", "line": 41, "evidence": "discounted = roundMoney(subtotal * (1-discount)) then taxed = roundMoney(discounted * (1+tax))", "fix": "Carry full precision through discount and tax, round once at the settlement boundary."},
+  {"rule": "ROU-4", "file": "eval/fixture-java/src/main/java/com/roastable/billing/Invoice.java", "line": 32, "evidence": "roundMoney(unitPriceFromBundle(bundleTotal, quantity) * quantity) rounds the per-unit price then multiplies", "fix": "Compute bundleTotal directly, do not round the per-unit figure before multiplying back by quantity."}
+]}

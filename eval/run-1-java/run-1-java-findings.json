@@ -1,0 +1,333 @@
+{
+  "findings": [
+    {
+      "rule": "STO-1",
+      "file": "eval/fixture-java/src/main/java/com/roastable/billing/Money.java",
+      "line": 18,
+      "evidence": "return Double.parseDouble(input)",
+      "fix": "Parse into BigDecimal via new BigDecimal(input), never a double money value."
+    },
+    {
+      "rule": "STO-1",
+      "file": "eval/fixture-java/src/main/java/com/roastable/billing/LedgerEntry.java",
+      "line": 27,
+      "evidence": "private double amount;",
+      "fix": "Type the entity money field as BigDecimal so it maps to a decimal column."
+    },
+    {
+      "rule": "STO-1",
+      "file": "eval/fixture-java/src/main/java/com/roastable/billing/WebhookEvent.java",
+      "line": 31,
+      "evidence": "private double amount;",
+      "fix": "Type the amount field as BigDecimal, not double."
+    },
+    {
+      "rule": "STO-1",
+      "file": "eval/fixture-java/src/main/resources/db/schema.sql",
+      "line": 15,
+      "evidence": "subtotal DOUBLE PRECISION (also tax, total, unit_price REAL, payments/webhook/ledger amount)",
+      "fix": "Use NUMERIC/DECIMAL for money columns, never DOUBLE PRECISION or REAL."
+    },
+    {
+      "rule": "STO-2",
+      "file": "eval/fixture-java/src/main/java/com/roastable/billing/Account.java",
+      "line": 27,
+      "evidence": "precision = 6, scale = 2 on balance",
+      "fix": "Size precision for the largest balance accumulator, e.g. precision 19 scale 4."
+    },
+    {
+      "rule": "STO-2",
+      "file": "eval/fixture-java/src/main/resources/db/schema.sql",
+      "line": 9,
+      "evidence": "balance NUMERIC(6, 2)",
+      "fix": "Widen to NUMERIC(19,4) or similar so a running balance cannot overflow."
+    },
+    {
+      "rule": "STO-3",
+      "file": "eval/fixture-java/src/main/java/com/roastable/billing/Money.java",
+      "line": 22,
+      "evidence": "Math.round(amount * 100) and minor / 100.0, unit only in the name",
+      "fix": "Use a Money value type carrying amount plus currency; keep conversion at the boundary only."
+    },
+    {
+      "rule": "STO-4",
+      "file": "eval/fixture-java/src/main/resources/db/schema.sql",
+      "line": 9,
+      "evidence": "balance and every amount column with no currency_code column",
+      "fix": "Add an ISO 4217 currency_code column next to each amount."
+    },
+    {
+      "rule": "STO-4",
+      "file": "eval/fixture-java/src/main/java/com/roastable/billing/Account.java",
+      "line": 27,
+      "evidence": "BigDecimal balance with no adjacent currency field",
+      "fix": "Bind amount and currency in a Money value type or add a currencyCode field."
+    },
+    {
+      "rule": "STO-4",
+      "file": "eval/fixture-java/src/main/java/com/roastable/billing/LedgerEntry.java",
+      "line": 27,
+      "evidence": "amount field with no adjacent currency",
+      "fix": "Store a currency alongside the amount or use a Money value type."
+    },
+    {
+      "rule": "STO-4",
+      "file": "eval/fixture-java/src/main/java/com/roastable/billing/WebhookEvent.java",
+      "line": 31,
+      "evidence": "amount field with no adjacent currency",
+      "fix": "Carry the currency with the amount, e.g. a currencyCode column."
+    },
+    {
+      "rule": "STO-5",
+      "file": "eval/fixture-java/src/main/java/com/roastable/billing/Money.java",
+      "line": 33,
+      "evidence": "Math.round(value * 100) / 100.0, hardcoded two decimals",
+      "fix": "Drive scale from the currency ISO 4217 minor-unit exponent, not a hardcoded 100."
+    },
+    {
+      "rule": "STO-7",
+      "file": "eval/fixture-java/src/main/java/com/roastable/billing/Money.java",
+      "line": 39,
+      "evidence": "new BigDecimal(amount) where amount is a double",
+      "fix": "Build from a String or use BigDecimal.valueOf(amount); never new BigDecimal(double)."
+    },
+    {
+      "rule": "ROU-1",
+      "file": "eval/fixture-java/src/main/java/com/roastable/billing/Money.java",
+      "line": 33,
+      "evidence": "Math.round(value * 100) / 100.0",
+      "fix": "Use BigDecimal.setScale(2, RoundingMode.HALF_UP) with an explicit mode, not Math.round on a double."
+    },
+    {
+      "rule": "ROU-1",
+      "file": "eval/fixture-java/src/main/java/com/roastable/billing/Money.java",
+      "line": 23,
+      "evidence": "Math.round(amount * 100)",
+      "fix": "Convert to minor units via BigDecimal with an explicit RoundingMode rather than Math.round on a binary float."
+    },
+    {
+      "rule": "ROU-2",
+      "file": "eval/fixture-java/src/main/java/com/roastable/billing/Split.java",
+      "line": 21,
+      "evidence": "parts[i] = Money.roundMoney(total * weights[i] / weightSum) in a loop, no residual reconciliation",
+      "fix": "Use largest-remainder allocation in integer minor units so sum(parts) == total by construction."
+    },
+    {
+      "rule": "ROU-3",
+      "file": "eval/fixture-java/src/main/java/com/roastable/billing/Invoice.java",
+      "line": 41,
+      "evidence": "discounted = roundMoney(subtotal * (1-discount)) then taxed = roundMoney(discounted * (1+tax))",
+      "fix": "Carry full precision through discount and tax, round once at the settlement boundary."
+    },
+    {
+      "rule": "ROU-4",
+      "file": "eval/fixture-java/src/main/java/com/roastable/billing/Invoice.java",
+      "line": 32,
+      "evidence": "roundMoney(unitPriceFromBundle(bundleTotal, quantity) * quantity) rounds the per-unit price then multiplies",
+      "fix": "Compute bundleTotal directly, do not round the per-unit figure before multiplying back by quantity."
+    },
+    {
+      "rule": "IDE-1",
+      "file": "eval/fixture-java/src/main/java/com/roastable/billing/WebhookService.java",
+      "line": 38,
+      "evidence": "store.creditAccount(...) then events.save(...), no existsByEventId dedup before crediting",
+      "fix": "Look up the event id (existsByEventId) and skip the credit if already processed, inside one transaction with the marker insert."
+    },
+    {
+      "rule": "IDE-2",
+      "file": "eval/fixture-java/src/main/java/com/roastable/billing/WebhookService.java",
+      "line": 48,
+      "evidence": "POST /v1/charges in a retry loop with no Idempotency-Key header",
+      "fix": "Mint one idempotency key per charge, persist it, and send it as an Idempotency-Key header on every retry."
+    },
+    {
+      "rule": "IDE-3",
+      "file": "eval/fixture-java/src/main/java/com/roastable/billing/Store.java",
+      "line": 34,
+      "evidence": "account.getBalance().add(amount); account.setBalance(...); accounts.save(account)",
+      "fix": "Credit with one atomic UPDATE (balance = balance + :amt) or add a @Version / PESSIMISTIC_WRITE lock."
+    },
+    {
+      "rule": "IDE-3",
+      "file": "eval/fixture-java/src/main/java/com/roastable/billing/Store.java",
+      "line": 43,
+      "evidence": "account.getBalance().subtract(amount); account.setBalance(...); accounts.save(account)",
+      "fix": "Debit with one atomic UPDATE (SET balance = balance - :amt WHERE balance >= :amt) and treat 0 rows as insufficient funds."
+    },
+    {
+      "rule": "IDE-4",
+      "file": "eval/fixture-java/src/main/resources/db/schema.sql",
+      "line": 40,
+      "evidence": "event_id VARCHAR(255), nullable, no UNIQUE on the webhook_events dedup column",
+      "fix": "Make it event_id VARCHAR(255) NOT NULL UNIQUE so the DB is the final dedup backstop."
+    },
+    {
+      "rule": "IDE-4",
+      "file": "eval/fixture-java/src/main/resources/db/schema.sql",
+      "line": 34,
+      "evidence": "external_ref VARCHAR(255), nullable, no UNIQUE on the payments external reference",
+      "fix": "Add a UNIQUE constraint (NOT NULL) on payments.external_ref to reject duplicate provider references."
+    },
+    {
+      "rule": "IDE-4",
+      "file": "eval/fixture-java/src/main/java/com/roastable/billing/WebhookEvent.java",
+      "line": 22,
+      "evidence": "@Column(name = \"event_id\") on eventId with no unique = true",
+      "fix": "Add unique = true to the event_id @Column so JPA DDL and the DB enforce dedup."
+    },
+    {
+      "rule": "LED-1",
+      "file": "eval/fixture-java/src/main/java/com/roastable/billing/Ledger.java",
+      "line": 44,
+      "evidence": "entry.setAmount(newAmount); entries.save(entry);",
+      "fix": "Leave the posted entry untouched and append a reversing entry plus a corrected entry, do not mutate and save."
+    },
+    {
+      "rule": "LED-2",
+      "file": "eval/fixture-java/src/main/java/com/roastable/billing/Ledger.java",
+      "line": 34,
+      "evidence": "postEntry saves one signed leg after a single debit OR credit, no paired counter-leg",
+      "fix": "Record two entries per movement sharing a transactionId, a debit and a credit, and assert sum(debit) == sum(credit) before commit."
+    },
+    {
+      "rule": "LED-3",
+      "file": "eval/fixture-java/src/main/java/com/roastable/billing/Ledger.java",
+      "line": 30,
+      "evidence": "store.debitAccount / creditAccount mutate a cached balance directly, no reconciliation to entries",
+      "fix": "Derive the balance by summing entries, or reconcile the stored balance against sum(entries) and alert on drift."
+    },
+    {
+      "rule": "LED-4",
+      "file": "eval/fixture-java/src/main/java/com/roastable/billing/LedgerEntry.java",
+      "line": 17,
+      "evidence": "ledger_entries entity has no createdBy/actorId and no reason/source/idempotencyKey",
+      "fix": "Add createdBy, reason/source, and an idempotency key so each money mutation records who moved money and why."
+    },
+    {
+      "rule": "FX-1",
+      "file": "eval/fixture-java/src/main/java/com/roastable/billing/Fx.java",
+      "line": 44,
+      "evidence": "Math.round(amount * rate * 100) / 100.0 rounds each leg; refundInOriginalCurrency reconverts",
+      "fix": "Treat conversion as one-way and lossy; fetch an independent inverse quote and never expect A->B->A to reconcile."
+    },
+    {
+      "rule": "FX-2",
+      "file": "eval/fixture-java/src/main/java/com/roastable/billing/Fx.java",
+      "line": 44,
+      "evidence": "RATES.get(...) applied and only the converted double returned; no rate value, source, or timestamp captured",
+      "fix": "Persist the rate value, source, and as-of timestamp alongside the amount as an immutable point-in-time fact."
+    },
+    {
+      "rule": "FX-3",
+      "file": "eval/fixture-java/src/main/java/com/roastable/billing/Fx.java",
+      "line": 49,
+      "evidence": "invoice.total = convert(...); invoice.currency = payoutCurrency overwrites in place, original amount/currency lost",
+      "fix": "Keep original amount and currency as the source of truth; store the converted figure as an added, separate field."
+    },
+    {
+      "rule": "FX-4",
+      "file": "eval/fixture-java/src/main/java/com/roastable/billing/Fx.java",
+      "line": 64,
+      "evidence": "total += invoice.total sums FxInvoice totals across differing currencies with no per-currency bucket",
+      "fix": "Aggregate per currency (group by invoice.currency); never sum mixed-currency amounts into one number."
+    },
+    {
+      "rule": "TIM-1",
+      "file": "eval/fixture-java/src/main/java/com/roastable/billing/LedgerEntry.java",
+      "line": 43,
+      "evidence": "this.createdAt = LocalDateTime.now();",
+      "fix": "Store the instant as Instant.now() in a timestamptz column, not zoneless LocalDateTime.now()."
+    },
+    {
+      "rule": "TIM-1",
+      "file": "eval/fixture-java/src/main/java/com/roastable/billing/WebhookEvent.java",
+      "line": 46,
+      "evidence": "this.receivedAt = LocalDateTime.now();",
+      "fix": "Store the instant as Instant.now() in a timestamptz column, not zoneless LocalDateTime.now()."
+    },
+    {
+      "rule": "TIM-1",
+      "file": "eval/fixture-java/src/main/resources/db/schema.sql",
+      "line": 19,
+      "evidence": "issued_at TIMESTAMP NOT NULL",
+      "fix": "Use TIMESTAMP WITH TIME ZONE (timestamptz) so the financial instant is stored as UTC."
+    },
+    {
+      "rule": "TIM-1",
+      "file": "eval/fixture-java/src/main/resources/db/schema.sql",
+      "line": 35,
+      "evidence": "received_at TIMESTAMP NOT NULL (payments)",
+      "fix": "Use TIMESTAMP WITH TIME ZONE (timestamptz) for the payment instant."
+    },
+    {
+      "rule": "TIM-1",
+      "file": "eval/fixture-java/src/main/resources/db/schema.sql",
+      "line": 44,
+      "evidence": "received_at TIMESTAMP NOT NULL (webhook_events)",
+      "fix": "Use TIMESTAMP WITH TIME ZONE (timestamptz) for the webhook instant."
+    },
+    {
+      "rule": "TIM-1",
+      "file": "eval/fixture-java/src/main/resources/db/schema.sql",
+      "line": 52,
+      "evidence": "created_at TIMESTAMP NOT NULL (ledger_entries)",
+      "fix": "Use TIMESTAMP WITH TIME ZONE (timestamptz) for the ledger-entry instant."
+    },
+    {
+      "rule": "TIM-2",
+      "file": "eval/fixture-java/src/main/java/com/roastable/billing/Interest.java",
+      "line": 24,
+      "evidence": "return Math.round(seconds / 86400.0);",
+      "fix": "Count days with ChronoUnit.DAYS.between on zoned/local dates, not an epoch-second divide by 86400."
+    },
+    {
+      "rule": "TIM-3",
+      "file": "eval/fixture-java/src/main/java/com/roastable/billing/Interest.java",
+      "line": 38,
+      "evidence": "!txn.at().isBefore(periodStart) && !txn.at().isAfter(periodEnd)",
+      "fix": "Use a half-open interval [start, next): !isBefore(start) && isBefore(end), so a boundary txn is counted once."
+    },
+    {
+      "rule": "TIM-4",
+      "file": "eval/fixture-java/src/main/java/com/roastable/billing/Interest.java",
+      "line": 30,
+      "evidence": "double dailyRate = annualRate / 365;",
+      "fix": "Read the instrument's day-count convention and compute the year fraction via a convention object, not a hardcoded /365."
+    },
+    {
+      "rule": "AGG-1",
+      "file": "eval/fixture-java/src/main/java/com/roastable/billing/Reports.java",
+      "line": 27,
+      "evidence": "double total = 0.0; total += amount over double[] amounts",
+      "fix": "Accumulate money in BigDecimal (or sum long minor units), not a double accumulator."
+    },
+    {
+      "rule": "AGG-3",
+      "file": "eval/fixture-java/src/main/java/com/roastable/billing/Reports.java",
+      "line": 47,
+      "evidence": "totalAllPages loops fetchPage.fetch(pageSize, offset) with offset += pageSize and total += sumAmounts(amounts) across pages",
+      "fix": "Compute the total in one SELECT SUM query over a single snapshot, or keyset-paginate inside one repeatable-read transaction, not limit/offset page-then-add over live data."
+    },
+    {
+      "rule": "TAX-1",
+      "file": "eval/fixture-java/src/main/java/com/roastable/billing/Tax.java",
+      "line": 30,
+      "evidence": "invoiceTaxByLines sums roundMoney(amount*rate) per line while invoiceTaxOnTotal rounds the total once",
+      "fix": "Pick one configured rounding level and call the same helper on every path so sum(round(line)) and round(sum) cannot disagree by a cent."
+    },
+    {
+      "rule": "TAX-2",
+      "file": "eval/fixture-java/src/main/java/com/roastable/billing/Tax.java",
+      "line": 47,
+      "evidence": "extractTaxFromGross: tax = roundMoney(gross * SALES_TAX_RATE) on an inclusive gross, rounded apart from net",
+      "fix": "Back tax out of the gross: net = round(gross/(1+rate)); tax = gross - net, so net + tax == gross exactly."
+    },
+    {
+      "rule": "TAX-3",
+      "file": "eval/fixture-java/src/main/java/com/roastable/billing/Tax.java",
+      "line": 15,
+      "evidence": "public static final double SALES_TAX_RATE = 0.0825; rate held as a binary double, used in double multiply-then-round",
+      "fix": "Hold the rate as integer basis points (825) or new BigDecimal(\"0.0825\") and do the math in BigDecimal or integer minor units."
+    }
+  ]
+}
