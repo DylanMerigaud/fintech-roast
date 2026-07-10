@@ -115,6 +115,7 @@ def charge():
 
 - A SELECT of a balance/quantity/counter into an application variable, arithmetic in code, then a separate UPDATE writing the computed value back: `SELECT balance ... ; balance = balance - amount; UPDATE ... SET balance = <computedValue>`. The write sets an absolute value derived from a stale read rather than `balance = balance - amount`.
 - ORM read-modify-save on a money field: `row = repo.find(id); row.balance -= amt; repo.save(row)` (ActiveRecord, Sequelize, Django `obj.save()`, Hibernate dirty-checking, GORM `Save`) with no row lock and no version column.
+- Java/JPA: a balance entity read via `repository.findById(id)`, mutated in the service, then written back with `save(...)` or by Hibernate dirty-checking, where the entity has no `@Version` field (no optimistic lock) and the read uses no `@Lock(LockModeType.PESSIMISTIC_WRITE)`. A `@Transactional` service method doing `acct.setBalance(acct.getBalance().subtract(amt))` with a plain `findById`, or a check-then-act `if (acct.getBalance().compareTo(amt) >= 0)` between the JPA read and the save, is the read-modify-write race in Spring form.
 - Python: a SQLAlchemy `acct = session.get(Account, id); acct.balance -= amt; session.commit()`, or Django `acct = Account.objects.get(pk=id); acct.balance -= amt; acct.save()`, with no `select(...).with_for_update()` / `select_for_update()` on the read and no `F()` expression on the write, so two workers overwrite each other. A Django `select_for_update()` used OUTSIDE a `transaction.atomic()` block (it silently takes no lock and raises `TransactionManagementError` on some setups). A check-then-act `if acct.balance >= amt:` in Python between the ORM read and save, with no `WHERE balance >= amt` guard.
 - A check-then-act on available funds split across statements: `SELECT balance` then `if (balance >= amount)` in code then `UPDATE`, with no `FOR UPDATE` on the read and no `WHERE balance >= amount` guard on the write, allowing an overdraft under concurrency.
 - The read that feeds the decision lacks `SELECT ... FOR UPDATE` / `SELECT ... FOR NO KEY UPDATE`, and the transaction runs at READ COMMITTED (the default), so two concurrent transactions both read the same starting value.
@@ -149,6 +150,22 @@ with Session(engine) as session, session.begin():
     acct.balance -= amt  # safe: the row is locked for this transaction
 ```
 
+```java
+// Java (Spring Data JPA): do the arithmetic in ONE statement; 0 rows == insufficient funds.
+@Modifying
+@Query("UPDATE Account a SET a.balance = a.balance - :amt WHERE a.id = :id AND a.balance >= :amt")
+int debit(@Param("id") Long id, @Param("amt") BigDecimal amt);   // rows == 0 -> no overdraft
+
+// When a prior read is genuinely needed, guard the entity with an optimistic lock:
+@Entity
+class Account {
+    @Version long version;   // JPA optimistic lock value; a stale write is rejected on flush
+    @Column(precision = 19, scale = 4) BigDecimal balance;
+}
+// or take a real row lock on the read:
+// @Lock(LockModeType.PESSIMISTIC_WRITE) Optional<Account> findById(Long id);
+```
+
 **False positives**
 
 - The value is not concurrently mutated: a per-request row created and owned by one writer, or a field only ever written by a single serialized worker, where no second transaction can interleave.
@@ -160,6 +177,7 @@ with Session(engine) as session, session.begin():
 
 1. [Explicit Locking (Row-Level Locks, FOR UPDATE)](https://www.postgresql.org/docs/current/explicit-locking.html) (PostgreSQL Global Development Group)
 2. [Transaction Isolation (Read Committed Isolation Level)](https://www.postgresql.org/docs/current/transaction-iso.html) (PostgreSQL Global Development Group)
+3. [Jakarta Persistence 3.1: Version annotation (optimistic locking)](https://jakarta.ee/specifications/persistence/3.1/apidocs/jakarta.persistence/jakarta/persistence/version) (Eclipse Foundation, Jakarta EE)
 
 ## IDE-4: External transaction references need a database UNIQUE constraint as the last line of dedup defense
 
