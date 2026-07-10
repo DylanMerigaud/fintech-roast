@@ -28,3 +28,17 @@ jobs:
       - run: npm install --no-audit --no-fund
       - run: npm run typecheck
       - run: npm test
+
+  fixture-java:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: eval/fixture-java
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      - run: mvn -B test
