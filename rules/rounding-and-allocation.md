@@ -87,7 +87,24 @@ def allocate(total_cents: int, weights: list[int]) -> list[int]:
         floors[i] += 1
     return floors                                               # sum(floors) == total_cents by construction
 
-parts = allocate(500, [70, 30])                                 # [4, 1] on the 5c 70/30 split, sums to 5
+parts = allocate(5, [70, 30])                                   # [4, 1] on the 5c 70/30 split, sums to 5
+```
+
+```java
+// Java: same largest-remainder allocation in integer minor units (cents).
+static long[] allocate(long totalCents, int[] weights) {
+    long ws = 0; for (int w : weights) ws += w;
+    long[] parts = new long[weights.length];
+    long allocated = 0;
+    for (int i = 0; i < weights.length; i++) { parts[i] = totalCents * weights[i] / ws; allocated += parts[i]; }
+    long remainder = totalCents - allocated;                     // cents still to hand out
+    Integer[] order = new Integer[weights.length];
+    for (int i = 0; i < order.length; i++) order[i] = i;         // rank by dropped fraction, largest first
+    java.util.Arrays.sort(order, (a, b) -> Long.compare((totalCents * weights[b]) % ws, (totalCents * weights[a]) % ws));
+    for (int k = 0; k < remainder; k++) parts[order[k]]++;
+    return parts;                                                // sum(parts) == totalCents by construction
+}
+// allocate(5, new int[]{70, 30}) -> [4, 1] on the 5c 70/30 split, sums to 5
 ```
 
 **False positives**
@@ -139,6 +156,17 @@ gross = net * (1 + vat)               # 20.3898, still full precision
 total = gross.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)  # single rounding: 20.39
 ```
 
+```java
+// Java: same pipeline in BigDecimal, no setScale between the multiplies, round ONCE at the end.
+BigDecimal price    = new BigDecimal("19.99");
+BigDecimal discount = new BigDecimal("0.15");
+BigDecimal vat      = new BigDecimal("0.20");
+
+BigDecimal net   = price.multiply(BigDecimal.ONE.subtract(discount));   // 16.9915, full precision
+BigDecimal gross = net.multiply(BigDecimal.ONE.add(vat));               // 20.38980, full precision
+BigDecimal total = gross.setScale(2, RoundingMode.HALF_UP);             // single rounding: 20.39
+```
+
 **False positives**
 
 - A jurisdiction that explicitly mandates per-line rounding (so rounding each line before summing is correct, not a bug); the fix is to match the mandate, and per-line rounding there is a false positive.
@@ -152,6 +180,7 @@ total = gross.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)  # single roundi
 2. [VATREC12020: Rounding on invoices and rounding at retailers, rounding at retailers](https://www.gov.uk/hmrc-internal-manuals/vat-trader-records/vatrec12020) (HM Revenue and Customs)
 3. [Rounding rules for Stripe fees](https://support.stripe.com/questions/rounding-rules-for-stripe-fees) (Stripe)
 4. [Manage products and prices (line-item rounding, unit_amount_decimal)](https://docs.stripe.com/products-prices/manage-prices) (Stripe)
+5. [Java SE 21 java.math.BigDecimal (setScale, RoundingMode)](https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/math/BigDecimal.html) (Oracle)
 
 ## ROU-4: Dividing before multiplying on money
 
@@ -188,6 +217,15 @@ tax  = (Decimal("199.99") * Decimal("825") / Decimal("10000")).quantize(
            Decimal("0.01"), rounding=ROUND_HALF_UP)                               # 8.25% of 199.99
 ```
 
+```java
+// Java: multiply first, divide/round once at the end (never pre-round the per-unit figure).
+BigDecimal line = new BigDecimal("0.05").multiply(new BigDecimal(30))
+        .setScale(2, RoundingMode.HALF_UP);                                    // 1.50
+// percentage: keep the rate whole, divide by 10000 last with an explicit mode
+BigDecimal tax = new BigDecimal("199.99").multiply(new BigDecimal("825"))
+        .divide(new BigDecimal("10000"), 2, RoundingMode.HALF_UP);             // 8.25% of 199.99
+```
+
 **False positives**
 
 - Exact division that cannot lose precision (the divisor evenly divides the amount, e.g. splitting an even number of cents by 2, or fixed-scale decimals where the quotient terminates within scale).
@@ -201,3 +239,4 @@ tax  = (Decimal("199.99") * Decimal("825") / Decimal("10000")).quantize(
 2. [Disasters due to rounding error (Vancouver Stock Exchange)](https://diamhomes.ewi.tudelft.nl/~kvuik/wi211/disasters.html) (Kees Vuik, TU Delft)
 3. [Manage products and prices (multiply-then-round)](https://docs.stripe.com/products-prices/manage-prices) (Stripe)
 4. [Currencies (smallest currency unit, zero-decimal currencies)](https://docs.stripe.com/currencies) (Stripe)
+5. [Java SE 21 java.math.BigDecimal (multiply, divide, setScale)](https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/math/BigDecimal.html) (Oracle)
