@@ -32,6 +32,15 @@ total = sum((Decimal(r.amount_str) for r in rows), start=Decimal("0"))  # exact,
 total_cents = sum(r.amount_cents for r in rows)   # int accumulator, exact
 ```
 
+```java
+// Java: reduce in BigDecimal (or sum long minor units), never a double accumulator.
+BigDecimal total = rows.stream()
+    .map(Row::getAmount)                  // BigDecimal, not double
+    .reduce(BigDecimal.ZERO, BigDecimal::add);   // exact, order-independent
+// or, if amounts are integer cents:
+long totalCents = rows.stream().mapToLong(Row::getAmountCents).sum();   // exact
+```
+
 **False positives**
 
 - Non-monetary statistics where a tiny relative error is irrelevant: analytics dashboards, ML feature sums, sensor or telemetry averages, sampled metrics. Float is the correct, fast tool there.
@@ -47,6 +56,7 @@ total_cents = sum(r.amount_cents for r in rows)   # int accumulator, exact
 4. [PostgreSQL: Monetary Types](https://www.postgresql.org/docs/current/datatype-money.html) (PostgreSQL Global Development Group)
 5. [PostgreSQL: Aggregate Functions](https://www.postgresql.org/docs/current/functions-aggregate.html) (PostgreSQL Global Development Group)
 6. [Stripe: Currencies](https://docs.stripe.com/currencies) (Stripe)
+7. [Java SE 21 java.math.BigDecimal](https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/math/BigDecimal.html) (Oracle)
 
 ## AGG-2: Precision silently lost at ORM, driver, or JSON boundaries
 
@@ -79,6 +89,15 @@ payload = json.loads(body, parse_float=Decimal, parse_int=Decimal)  # never coer
 amount = Decimal(str(row["amount"]))   # if a driver already handed back a float, stringify first
 ```
 
+```java
+// Java: read a DECIMAL column as BigDecimal, never getDouble/getFloat (they narrow to binary64).
+BigDecimal amount = rs.getBigDecimal("amount");    // JDBC: exact, not rs.getDouble("amount")
+
+@Column(precision = 19, scale = 4)                 // JPA: map the column to BigDecimal, not double
+private BigDecimal balance;
+// on the wire, a Jackson @JsonSerialize(using = ToStringSerializer.class) keeps money a string (API-1).
+```
+
 **False positives**
 
 - A boundary carrying only integer minor units within the safe range: amounts in cents as integers below 2^53, or ids that are UUIDs or strings, round-trip through JSON and native Number exactly, so a Number mapping there is fine.
@@ -105,6 +124,7 @@ amount = Decimal(str(row["amount"]))   # if a driver already handed back a float
 - Aggregation or export that loops pages and accumulates a total across them (sum, count, invoice or settlement batch, statement generation, balance rollup) rather than computing the aggregate in one query.
 - Cursor variables named `page`, `offset`, `skip` computed as `page * pageSize`; ORM calls like `.offset(n).limit(m)`, `.skip(n).take(m)`, `LIMIT n OFFSET m`, Django `qs[offset:offset+limit]` iterated to sum money.
 - Python: a loop that pages then accumulates in code, e.g. `total = Decimal("0"); for page in range(...): total += sum(Decimal(r.amount) for r in qs[page*size:(page+1)*size])`, or a Django `Sum(...)` aggregate run per page and added up, instead of one `qs.aggregate(Sum("amount"))` over the whole set in a single snapshot.
+- Java: a Spring Data `PageRequest.of(page, size)` / `repo.findAll(pageable)` loop that accumulates a money total across pages (each page its own transaction under READ COMMITTED), instead of one `@Query("SELECT SUM(t.amount) ...")` over the whole set in a single snapshot, or a `@Query` paged by OFFSET with an ORDER BY on a non-unique key.
 - ORDER BY on a non-unique or mutable key (e.g. ORDER BY created_at without a unique tiebreaker), so rows with equal keys can reshuffle between page fetches.
 - Streaming or keyset pagination whose `WHERE key > :last` boundary can be crossed by updates that change the sort key mid-scan, or that runs outside a single snapshot when exactness is required.
 - A multi-page read of a financial dataset with no single-snapshot guarantee: pages served under READ COMMITTED across separate transactions, no repeatable-read or serializable snapshot and no immutable cursor key.
