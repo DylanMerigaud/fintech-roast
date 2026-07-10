@@ -280,3 +280,47 @@ new BigDecimal(1999)         // exact: an int/long is fine (minor units)
 1. [decimal, Decimal fixed-point and floating-point arithmetic](https://docs.python.org/3/library/decimal.html) (Python Software Foundation)
 2. [Java SE 21 java.math.BigDecimal](https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/math/BigDecimal.html) (Oracle)
 3. [What Every Computer Scientist Should Know About Floating-Point Arithmetic](https://docs.oracle.com/cd/E19957-01/806-3568/ncg_goldberg.html) (David Goldberg, Oracle mirror of ACM Computing Surveys 1991)
+
+## STO-8: BigDecimal equality by equals() instead of compareTo()
+
+**Severity**: high
+
+**What to detect**
+
+- Java: `a.equals(b)` (or `a == b`) used to test whether two `BigDecimal` money values are the same amount, where the two values can carry different scales (`new BigDecimal("1.0")` vs `new BigDecimal("1.00")`, or a parsed `"1.5"` vs a computed `1.50`).
+- `BigDecimal` used as a `HashSet` element, a `HashMap`/`Hashtable` key, or in `List.contains(...)` / `.indexOf(...)` / `.distinct()` for dedup, where membership silently depends on scale.
+- `BigDecimal` used as a key in a `TreeMap` or element in a `TreeSet` (or any `Comparator`-ordered collection) mixed with `equals`-based logic, since its natural ordering is inconsistent with `equals`.
+- Reconciliation, matching, or duplicate-detection code that compares amounts (bank line vs ledger line, expected vs actual, invoice vs payment) with `.equals` rather than `.compareTo(...) == 0`.
+- A `BigDecimal.ZERO` / sentinel check written as `x.equals(BigDecimal.ZERO)` where `x` may be `0.00` (scale 2) and therefore not `equals` to `0` (scale 0). Use `x.compareTo(BigDecimal.ZERO) == 0` or `x.signum() == 0`.
+
+**Why it breaks**
+
+`BigDecimal` distinguishes value from scale. Oracle's docs state that the `equals` method "requires both the numerical value and representation to be the same for equality to hold", while "the natural order of `BigDecimal` considers members of the same cohort to be equal to each other" (a cohort being the same value at different scales). So `new BigDecimal("1.0").equals(new BigDecimal("1.00"))` is false (scale 1 versus scale 2), even though `compareTo` returns 0 for the pair. Because hashing follows `equals`, `1.0` and `1.00` land in different hash buckets, so a `HashSet` holds both as distinct, a `HashMap` lookup misses, and `contains` returns false, meaning dedup and reconciliation silently pass records that are numerically identical. The values often gain different scales innocently: parsing a string, reading a `NUMERIC(19,4)` column, or the result of an arithmetic op that changes scale. Oracle warns directly that "care should be exercised if `BigDecimal` objects are used as keys in a `SortedMap` or elements in a `SortedSet` since `BigDecimal`'s natural ordering is inconsistent with equals", and the same hazard applies to hash-based collections through `equals`/`hashCode`.
+
+**Fix**
+
+Compare `BigDecimal` amounts for numeric equality with `a.compareTo(b) == 0`, never `a.equals(b)`, on any money path. For a zero/sign test use `compareTo(BigDecimal.ZERO) == 0` or `signum() == 0`. If amounts must be hashed, deduplicated, or used as map keys, first normalize every value to a single canonical scale (for example `stripTrailingZeros()`, or `setScale(currencyScale, RoundingMode.HALF_UP)`) at the boundary so that equal values share a representation, and only then insert them into a `HashSet`/`HashMap`; do not rely on `HashSet`/`TreeSet` de-dup over mixed-scale `BigDecimal`. For ordered collections, supply an explicit `Comparator` and remember its ordering is inconsistent with `equals`. This is a Java-specific hazard: Python's `Decimal` compares and hashes by value, so `Decimal("1.0") == Decimal("1.00")` is True and a `set` of the two dedups to one; the trap is that Java's `BigDecimal.equals` and `hashCode` fold in scale.
+
+```java
+BigDecimal a = new BigDecimal("1.0");
+BigDecimal b = new BigDecimal("1.00");
+a.equals(b);            // false  (scale 1 != scale 2)
+a.compareTo(b) == 0;    // true   (same value: use this for money equality)
+
+// dedup: normalize to one fixed scale first, then hash
+Set<BigDecimal> seen = new HashSet<>();
+seen.add(a.setScale(2, RoundingMode.HALF_UP));        // 1.00
+seen.contains(b.setScale(2, RoundingMode.HALF_UP));   // true (both 1.00)
+```
+
+**False positives**
+
+- A deliberate cache/interning key where `BigDecimal` identity must include scale (two representations are intentionally treated as distinct, for example an audit of the exact stored form), documented as such.
+- Code that has already normalized every `BigDecimal` to one canonical scale at the boundary, so `equals` and `compareTo` can no longer disagree for the values in play.
+- Non-money `BigDecimal` values (a measurement, a ratio) where scale is not semantically "the same amount" and an exact `equals` is intended.
+- A test asserting the scale-sensitivity of `equals` itself (demonstrating this very rule).
+
+**Sources**
+
+1. [Java SE 21 java.math.BigDecimal](https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/math/BigDecimal.html) (Oracle)
+2. [OpenJDK: BigDecimal.java reference implementation](https://github.com/openjdk/jdk/blob/master/src/java.base/share/classes/java/math/BigDecimal.java) (OpenJDK)
