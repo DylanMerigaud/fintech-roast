@@ -43,6 +43,18 @@ body = json.dumps({"amount": Decimal("19.99"), "currency": "USD"}, cls=MoneyEnco
 data = json.loads(body, parse_float=Decimal)   # data["amount"] is Decimal("19.99")
 ```
 
+```java
+// Java (Jackson): Jackson writes a BigDecimal as a JSON *number* by default (unquoted 19.99),
+// which is the bug. Serialize money as a string with ToStringSerializer.
+class Invoice {
+    @JsonSerialize(using = ToStringSerializer.class)   // -> "amount":"19.99", parsed back into BigDecimal
+    BigDecimal amount;
+    String currency;                                   // ISO 4217, always alongside the amount
+}
+// If money must stay numeric, at least mapper.enable(SerializationFeature.WRITE_BIGDECIMAL_AS_PLAIN)
+// avoids scientific notation, but a string is the safe wire form.
+```
+
 **False positives**
 
 - Zero-decimal or approximate values where sub-unit precision is irrelevant and the magnitude stays well under 2^53: a JPY integer amount, a display-only rounded figure, or a percentage/FX-rate field that is genuinely a rate rather than a settled money amount.
@@ -55,6 +67,7 @@ data = json.loads(body, parse_float=Decimal)   # data["amount"] is Decimal("19.9
 2. [Number.MAX_SAFE_INTEGER](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/MAX_SAFE_INTEGER) (MDN Web Docs)
 3. [decimal: Decimal fixed-point and floating-point arithmetic](https://docs.python.org/3/library/decimal.html) (Python Software Foundation)
 4. [json, JSON encoder and decoder](https://docs.python.org/3/library/json.html) (Python Software Foundation)
+5. [Jackson databind Serialization Features (WRITE_BIGDECIMAL_AS_PLAIN)](https://github.com/FasterXML/jackson-databind/wiki/Serialization-Features) (FasterXML, Jackson)
 
 ## API-2: GraphQL Float used for a money field
 
@@ -66,6 +79,7 @@ data = json.loads(body, parse_float=Decimal)   # data["amount"] is Decimal("19.9
 - Python: a Graphene field typed `graphene.Float()` for money, a Strawberry field annotated `amount: float` (Strawberry maps the `float` annotation onto the GraphQL `Float` scalar), or a resolver returning a Python `float` for a price/balance. Money as `graphene.Int()` at a magnitude above 2^31-1 has the same overflow trap as any Int minor-unit field.
 - Resolvers returning a JavaScript number / Python float / Go float64 for a money field, or input args declared `Float` that feed a charge, transfer, refund, or price mutation.
 - A custom scalar named `Money`/`Decimal`/`Currency` that is actually implemented as a thin alias over `Float` (its `serialize`/`parseValue` just cast to a number).
+- Java: a graphql-java money field bound to `Scalars.GraphQLFloat` (or an SDL `Float`), or a DGS/spring-graphql resolver returning a `double`/`Double` for a price/balance instead of a custom `Money` scalar backed by `BigDecimal`.
 - Money represented as `Int` minor units but at a magnitude that can exceed the GraphQL Int bound of 2^31-1 (2147483647), e.g. a balance in cents above roughly 21.4 million dollars, which overflows the spec's signed 32-bit Int.
 - Client codegen (`graphql-codegen`, Apollo typed hooks) mapping a money field to the TS `number` type because the schema said `Float`/`Int`.
 
@@ -149,6 +163,19 @@ def parse_money(raw: str) -> Decimal:
         raise ValueError(f"not a canonical money string: {raw!r}")
 ```
 
+```java
+// Java: validate a strict grammar, then build the BigDecimal from the string.
+// Never Double.parseDouble (binary rounding) and never new BigDecimal(double) (STO-7).
+static final Pattern MONEY = Pattern.compile("-?\\d+(\\.\\d{1,2})?");
+
+static BigDecimal parseMoney(String raw) {
+    String s = raw.strip();
+    if (!MONEY.matcher(s).matches())            // reject "", "12,34", "3.14abc" -> 400, do not coerce
+        throw new IllegalArgumentException("not a canonical money string: " + raw);
+    return new BigDecimal(s);                    // exact: the String constructor, not Double.parseDouble
+}
+```
+
 **False positives**
 
 - Parsing a value you fully control and have already validated to be a canonical dot-decimal or integer string (e.g. re-reading your own serialized `"1999"` minor units), where partial-parse and locale ambiguity cannot occur.
@@ -161,6 +188,7 @@ def parse_money(raw: str) -> Decimal:
 1. [parseFloat()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/parseFloat) (MDN Web Docs)
 2. [Number coercion (empty and whitespace strings coerce to 0)](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number#number_coercion) (MDN Web Docs)
 3. [decimal: Decimal fixed-point and floating-point arithmetic](https://docs.python.org/3/library/decimal.html) (Python Software Foundation)
+4. [Java SE 21 java.math.BigDecimal (String constructor)](https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/math/BigDecimal.html) (Oracle)
 
 ## API-4: No canonical money representation across services
 
@@ -173,6 +201,7 @@ def parse_money(raw: str) -> Decimal:
 - Adapter/mapper code that multiplies or divides by 100 to bridge two services (`amount * 100`, `total / 100.0`, `cents = int(dollars * 100)`), a tell that the two sides disagree on units and are being reconciled ad hoc (and often via a float).
 - Python: one service's pydantic model typing the amount `float` while another types it `Decimal` and a third `int` cents, with no shared Money model imported across them; a `cents = int(dollars * 100)` bridge (which also floats before it ints, dropping a cent) instead of a single canonical type; a pydantic model carrying an amount but no `currency` field, so the scale is assumed at every hop.
 - Mixed scale assumptions for zero-decimal or three-decimal currencies (JPY has no minor unit, BHD and TND have three per ISO 4217): a hardcoded `*100` that is wrong for those currencies.
+- Java: one service's Jackson DTO typing the amount `double` (or a `long` cents) while another types it `BigDecimal`, with no shared Money type imported across them, and DTOs carrying an amount but no `currency` field, so every hop assumes the scale.
 - Column/type drift across the codebase for the same concept: `NUMERIC`/`DECIMAL` in one schema, `BIGINT` cents in another, `money` (the Postgres locale-dependent type) or `FLOAT`/`DOUBLE` elsewhere.
 - An internal API or event that names a field just `amount`/`price`/`total` with no unit suffix and no currency sibling, forcing every consumer to guess.
 
