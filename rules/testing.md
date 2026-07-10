@@ -43,6 +43,19 @@ def test_allocation_conserves_total(total_cents, weights):
     assert sum(parts) == total_cents           # strict equality, no lucky fixture passes a leaky split
 ```
 
+```java
+// Java (jqwik): generate arbitrary totals and weight vectors; jqwik shrinks any
+// counterexample to a minimal failing case. Strict equality, no lucky fixture passes.
+@Property
+boolean allocationConservesTotal(
+        @ForAll @IntRange(min = 0, max = 1_000_000_000) long totalCents,
+        @ForAll @Size(min = 1, max = 10) List<@IntRange(min = 1, max = 1000) Integer> weights) {
+    int[] ws = weights.stream().mapToInt(Integer::intValue).toArray();
+    long[] parts = allocate(totalCents, ws);   // integer minor units
+    return java.util.Arrays.stream(parts).sum() == totalCents;
+}
+```
+
 **False positives**
 
 - A pure display/formatting helper (render a Money to a localized string) has no arithmetic invariant to violate, so example-based tests are appropriate and a missing generator is not a defect.
@@ -57,6 +70,7 @@ def test_allocation_conserves_total(total_cents, weights):
 2. [Hypothesis documentation](https://hypothesis.readthedocs.io/en/latest/) (Hypothesis project)
 3. [QuickCheck: an automatic testing tool for Haskell](https://www.cse.chalmers.se/~rjmh/QuickCheck/) (Koen Claessen and John Hughes, Chalmers)
 4. [Money (Patterns of Enterprise Application Architecture)](https://martinfowler.com/eaaCatalog/money.html) (Martin Fowler)
+5. [jqwik User Guide (@Property, @ForAll, shrinking)](https://jqwik.net/docs/current/user-guide.html) (jqwik, Johannes Link)
 
 ## TST-2: Round-number fixtures (100.00, 10 percent) that cannot distinguish truncate from round from banker rounding
 
@@ -86,6 +100,14 @@ tax = (Decimal("19.99") * Decimal("0.08375")).quantize(Decimal("0.01"), rounding
 assert tax == Decimal("1.67")  # swap the mode and this assertion changes
 ```
 
+```java
+// Java (JUnit): pin the tie-breaking rule with a real .xx5 boundary in BigDecimal.
+// 1.005 -> 1.01 under HALF_UP but 1.00 under HALF_EVEN (0 is even); a round fixture hides this.
+assertEquals(new BigDecimal("1.01"), new BigDecimal("1.005").setScale(2, RoundingMode.HALF_UP));
+assertEquals(new BigDecimal("1.00"), new BigDecimal("1.005").setScale(2, RoundingMode.HALF_EVEN));
+// build the BigDecimal from the String, not new BigDecimal(1.005) (a double is not exactly 1.005, STO-7).
+```
+
 **False positives**
 
 - A fixture is round because the real domain value is genuinely round (a flat 100.00 monthly plan price, a fee defined by contract as exactly 5.00); the value is a business constant, not a test smell, provided some OTHER test still exercises the rounding boundary.
@@ -99,6 +121,7 @@ assert tax == Decimal("1.67")  # swap the mode and this assertion changes
 2. [Python decimal module](https://docs.python.org/3/library/decimal.html) (Python Software Foundation)
 3. [Money (Patterns of Enterprise Application Architecture)](https://martinfowler.com/eaaCatalog/money.html) (Martin Fowler)
 4. [What Every Computer Scientist Should Know About Floating-Point Arithmetic](https://docs.oracle.com/cd/E19957-01/806-3568/ncg_goldberg.html) (David Goldberg, ACM Computing Surveys 1991, Oracle mirror)
+5. [RoundingMode (Java SE 21 API): HALF_UP versus HALF_EVEN](https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/math/RoundingMode.html) (Oracle)
 
 ## TST-3: Test suite covers one happy currency and no boundary magnitudes, refunds, or negatives
 
@@ -141,6 +164,23 @@ def test_to_minor_units(currency, amount, expected_minor):
     assert to_minor_units(amount, currency) == int(amount * (10 ** EXPONENT[currency]))
 ```
 
+```java
+// Java (JUnit 5): sweep the currency matrix and a refund; drive the exponent from
+// java.util.Currency so a hardcoded *100 fails on JPY (0 decimals) and BHD (3 decimals).
+@ParameterizedTest
+@CsvSource({
+    "JPY, 500,    500",      // 0 decimals: 500, not 50000
+    "USD, 5.00,   500",      // 2 decimals
+    "BHD, 5.000,  5000",     // 3 decimals: 5000, not 500
+    "USD, -19.99, -1999",    // refund keeps its sign
+})
+void toMinorUnits(String currency, BigDecimal amount, long expectedMinor) {
+    assertEquals(expectedMinor, toMinorUnits(amount, currency));
+    int digits = Currency.getInstance(currency).getDefaultFractionDigits();   // ISO 4217, not a literal
+    assertEquals(amount.movePointRight(digits).longValueExact(), toMinorUnits(amount, currency));
+}
+```
+
 **False positives**
 
 - A product that is contractually single-currency (a domestic-only service billing exclusively in one currency, enforced at the type or schema level) legitimately tests only that currency; multi-currency fixtures would test unreachable code.
@@ -154,3 +194,4 @@ def test_to_minor_units(currency, amount, expected_minor):
 2. [Adyen: Currency codes and minor units](https://docs.adyen.com/development-resources/currency-codes) (Adyen)
 3. [ISO 4217](https://en.wikipedia.org/wiki/ISO_4217) (Wikipedia, documenting the ISO 4217 standard)
 4. [ISTQB Foundation Level Syllabus: Black-Box Test Techniques](https://astqb.org/4-2-black-box-test-techniques/) (ASTQB / ISTQB)
+5. [Java SE 21 java.util.Currency (getDefaultFractionDigits)](https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/Currency.html) (Oracle)
