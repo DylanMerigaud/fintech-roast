@@ -1,0 +1,28 @@
+{
+  "run": "python fixture, run 1",
+  "notes": "Auditor findings accumulated one domain at a time (waves of <=3), audited independently against the rulebook without seeing the answer key. Domains completed so far: STO.",
+  "findings": [
+    {"rule": "STO-1", "file": "eval/fixture-py/money.py", "line": 10, "evidence": "parse_amount(input: str) -> float: return float(input), money parsed into a binary float", "fix": "parse straight into Decimal(input), never float"},
+    {"rule": "STO-1", "file": "eval/fixture-py/money.py", "line": 15, "evidence": "to_minor_units(amount: float) -> int: round(amount * 100), money held and computed as float", "fix": "accept Decimal or int cents, do exact arithmetic"},
+    {"rule": "STO-1", "file": "eval/fixture-py/money.py", "line": 20, "evidence": "from_minor_units(minor: int) -> float: minor / 100, returns a float money value", "fix": "return Decimal, e.g. Decimal(minor) / 100"},
+    {"rule": "STO-1", "file": "eval/fixture-py/money.py", "line": 25, "evidence": "round_money(value: float) -> float: round(value, 2), money typed and rounded as float", "fix": "operate on Decimal with quantize and an explicit rounding mode"},
+    {"rule": "STO-7", "file": "eval/fixture-py/money.py", "line": 32, "evidence": "to_decimal(amount: float) -> Decimal: return Decimal(amount), Decimal built directly from a float, freezing the float error", "fix": "Decimal(str(amount)), or never take a float and parse to Decimal at the boundary"},
+    {"rule": "STO-7", "file": "eval/fixture-py/money.py", "line": 12, "evidence": "float(input) parses the amount to float first, precision lost at the float() call before any Decimal wraps it", "fix": "parse external input directly into Decimal(input)"},
+    {"rule": "STO-5", "file": "eval/fixture-py/money.py", "line": 17, "evidence": "round(amount * 100) hardcodes 100 as the minor-unit multiplier for every currency (breaks JPY exp 0, BHD exp 3)", "fix": "scale by 10**exponent from an ISO 4217 currency table, not a literal 100"},
+    {"rule": "STO-5", "file": "eval/fixture-py/money.py", "line": 22, "evidence": "minor / 100 hardcodes a 2-decimal divisor for all currencies", "fix": "divide by 10**exponent looked up per currency"},
+    {"rule": "STO-5", "file": "eval/fixture-py/money.py", "line": 27, "evidence": "round(value, 2) assumes exactly 2 fractional digits for every currency", "fix": "round to the currency ISO 4217 minor-unit exponent, not a literal 2"},
+    {"rule": "STO-1", "file": "eval/fixture-py/db/schema.sql", "line": 18, "evidence": "subtotal DOUBLE PRECISION NOT NULL, money stored as binary float", "fix": "use NUMERIC(19,4) or integer minor units"},
+    {"rule": "STO-1", "file": "eval/fixture-py/db/schema.sql", "line": 20, "evidence": "tax DOUBLE PRECISION NOT NULL, money stored as binary float", "fix": "use NUMERIC(19,4)"},
+    {"rule": "STO-1", "file": "eval/fixture-py/db/schema.sql", "line": 21, "evidence": "total DOUBLE PRECISION NOT NULL, money stored as binary float", "fix": "use NUMERIC(19,4)"},
+    {"rule": "STO-1", "file": "eval/fixture-py/db/schema.sql", "line": 33, "evidence": "unit_price REAL NOT NULL, unit price stored as binary float", "fix": "use NUMERIC(19,4) with guard digits for sub-cent prices"},
+    {"rule": "STO-1", "file": "eval/fixture-py/db/schema.sql", "line": 40, "evidence": "amount DOUBLE PRECISION NOT NULL (payments), payment amount as double", "fix": "use NUMERIC(19,4) or BIGINT minor units"},
+    {"rule": "STO-1", "file": "eval/fixture-py/db/schema.sql", "line": 56, "evidence": "amount DOUBLE PRECISION NOT NULL (webhook_events), credited amount as double", "fix": "use NUMERIC(19,4)"},
+    {"rule": "STO-1", "file": "eval/fixture-py/db/schema.sql", "line": 65, "evidence": "amount DOUBLE PRECISION NOT NULL (ledger_entries), ledger entry amount as double", "fix": "use NUMERIC(19,4), a ledger must be exact"},
+    {"rule": "STO-2", "file": "eval/fixture-py/db/schema.sql", "line": 10, "evidence": "balance NUMERIC(6,2), a running account balance accumulator caps at 9999.99 and overflows", "fix": "size precision for the largest total, e.g. NUMERIC(19,4)"},
+    {"rule": "STO-4", "file": "eval/fixture-py/db/schema.sql", "line": 10, "evidence": "accounts.balance has no adjacent currency column, every balance is a bare number with no unit", "fix": "add currency_code CHAR(3) (ISO 4217) per row"},
+    {"rule": "STO-4", "file": "eval/fixture-py/db/schema.sql", "line": 18, "evidence": "invoices subtotal, tax, total have no currency column alongside the amounts", "fix": "add a currency_code column to invoices"},
+    {"rule": "STO-4", "file": "eval/fixture-py/db/schema.sql", "line": 40, "evidence": "payments.amount has no currency column", "fix": "add currency_code to payments"},
+    {"rule": "STO-4", "file": "eval/fixture-py/db/schema.sql", "line": 56, "evidence": "webhook_events.amount has no currency column", "fix": "add currency_code to webhook_events"},
+    {"rule": "STO-4", "file": "eval/fixture-py/db/schema.sql", "line": 65, "evidence": "ledger_entries.amount has no currency column", "fix": "add currency_code to ledger_entries"}
+  ]
+}
