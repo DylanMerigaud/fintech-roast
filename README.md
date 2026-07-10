@@ -15,14 +15,16 @@ code, serialization), audits each against a sourced rulebook of how money-handli
 actually breaks, adversarially verifies every finding, and reports what survives with the
 rule and the sources behind it.
 
-Building in public. This is early: the rulebook and the plugin are here, the public
-benchmark is next.
+Building in public. The rulebook, the plugin, and a first benchmark are here. The rulebook
+gives per-language detection and fixes for JavaScript/TypeScript and Python today, with Java
+in progress. Results live in [`eval/`](eval/).
 
 ## Why this exists, and what it is not
 
 Most "AI code review" for money is a single prompt that pattern-matches on "float" and
-calls it a day. The value here is not the prompt, it is **the rulebook**: 39 rules across
-10 domains, each one researched against primary sources (specs, standards, tax-authority
+calls it a day. The value here is not the prompt, it is **the rulebook**: 40 rules across
+10 domains, with per-language detection and fixes for JavaScript/TypeScript and Python (Java
+in progress), each one researched against primary sources (specs, standards, tax-authority
 manuals, canonical engineering literature), each one carrying its own false-positive notes,
 and each one put through an adversarial pass whose only job was to refute it. The agent is
 just the mechanism that applies the rulebook to your code.
@@ -34,13 +36,13 @@ you act on a finding. Every rule documents where it cries wolf.
 
 ## The rulebook
 
-39 rules, in [`rules/`](rules/). Each rule: what to detect, why it breaks (with real
+40 rules, in [`rules/`](rules/). Each rule: what to detect, why it breaks (with real
 incidents where they exist), the fix, its false positives, and at least two authoritative
 sources. Format contract and severity scale in [`rules/README.md`](rules/README.md).
 
 | Domain | Rules | A few of the failures it catches |
 | --- | --- | --- |
-| [Storage and types](rules/storage-and-types.md) | STO-1..6 | float money, wrong DECIMAL scale, ambiguous minor units, missing currency, hardcoded 2 decimals, type overflow |
+| [Storage and types](rules/storage-and-types.md) | STO-1..7 | float money, wrong DECIMAL scale, ambiguous minor units, missing currency, hardcoded 2 decimals, type overflow, exact-decimal built from a float |
 | [Rounding and allocation](rules/rounding-and-allocation.md) | ROU-1..4 | implicit rounding mode, splits that do not sum to the total, order-dependent discount/tax, divide-before-multiply |
 | [Idempotency and concurrency](rules/idempotency-and-concurrency.md) | IDE-1..4 | non-idempotent webhooks, missing idempotency keys, balance read-modify-write races, no unique constraint backstop |
 | [Ledger design](rules/ledger-design.md) | LED-1..4 | mutating posted entries, single-entry money movement, drifting cached balances, no audit trail |
@@ -71,9 +73,12 @@ It is read-only. It never edits your code, opens PRs, or files issues.
 all ten domains, and an answer key. The fixture compiles clean and its tests pass, because
 the tests use round numbers and one currency, which is the point (see TST-2, TST-3). The
 scorer (`eval/score.py`) measures how many planted bugs the agent finds and how many of its
-findings land on a real planted bug. Numbers are published in [`eval/RESULTS.md`](eval/RESULTS.md)
-as the plugin's precision and recall improve; the honest version, including misses, stays in
-the repo.
+findings land on a real planted bug. Per-language runs are tracked separately, each with its
+own method and caveats so the numbers are not read out of context: the TypeScript run (a cold
+full-repo scan, recall 86 percent) in [`eval/RESULTS.md`](eval/RESULTS.md), and the Python run
+(audited per domain against a matching Python fixture in [`eval/fixture-py/`](eval/fixture-py/))
+in [`eval/RESULTS-py.md`](eval/RESULTS-py.md). The honest version, including misses and the
+limits of each run, stays in the repo.
 
 ## Contributing
 
