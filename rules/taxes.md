@@ -44,6 +44,18 @@ def invoice_tax(lines, rate: Decimal, level: str) -> Decimal:
     raise ValueError(level)
 ```
 
+```java
+// Java: one helper, the level is an explicit argument, every path (PDF, API, ledger) calls it.
+BigDecimal invoiceTax(List<Line> lines, BigDecimal rate, Level level) {
+    if (level == Level.LINE)          // round each line, then sum the rounded parts
+        return lines.stream()
+            .map(l -> l.net().multiply(rate).setScale(2, RoundingMode.HALF_UP))
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
+    BigDecimal subtotal = lines.stream().map(Line::net).reduce(BigDecimal.ZERO, BigDecimal::add);
+    return subtotal.multiply(rate).setScale(2, RoundingMode.HALF_UP);   // document: round the total once
+}
+```
+
 **False positives**
 
 - A deliberately configured, single-source rounding policy where line-level rounding is the intended and jurisdiction-permitted method and every reporting path calls the same rounded values (e.g. a country that requires per-line rounding); consistency, not the level, is what matters.
@@ -56,6 +68,7 @@ def invoice_tax(lines, rate: Decimal, level: str) -> Decimal:
 2. [VATREC12020: Rounding on invoices and rounding at retailers, rounding at retailers](https://www.gov.uk/hmrc-internal-manuals/vat-trader-records/vatrec12020) (HM Revenue and Customs)
 3. [Tax invoices (GST rounding: total invoice rule vs taxable supply rule)](https://www.ato.gov.au/businesses-and-organisations/gst-excise-and-indirect-taxes/gst/tax-invoices) (Australian Taxation Office)
 4. [Set up your tax rates (line-item level vs invoice level rounding)](https://docs.stripe.com/billing/taxes/tax-rates) (Stripe)
+5. [Java SE 21 java.math.BigDecimal (setScale, RoundingMode)](https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/math/BigDecimal.html) (Oracle)
 
 ## TAX-2: Tax-inclusive vs tax-exclusive confusion
 
@@ -94,6 +107,18 @@ def split(amount: Decimal, rate: Decimal, inclusive: bool):
     return net, tax
 ```
 
+```java
+// Java: branch on the stored behavior; derive the second piece so net + tax == gross.
+BigDecimal[] split(BigDecimal amount, BigDecimal rate, boolean inclusive) {
+    if (inclusive) {
+        BigDecimal net = amount.divide(BigDecimal.ONE.add(rate), 2, RoundingMode.HALF_UP);
+        return new BigDecimal[]{net, amount.subtract(net)};   // tax derived: net + tax == gross exactly
+    }
+    BigDecimal tax = amount.multiply(rate).setScale(2, RoundingMode.HALF_UP);
+    return new BigDecimal[]{amount, tax};                     // exclusive: total = net + tax
+}
+```
+
 **False positives**
 
 - A price legitimately annotated as tax-inclusive being back-calculated with gross / (1 + rate); this is the correct method for inclusive pricing, not a bug, provided net and tax re-sum to the gross.
@@ -105,6 +130,7 @@ def split(amount: Decimal, rate: Decimal, inclusive: bool):
 1. [Specify tax behavior (inclusive vs exclusive)](https://docs.stripe.com/tax/products-prices-tax-codes-tax-behavior) (Stripe)
 2. [Set up your tax rates (the inclusive flag on a tax rate)](https://docs.stripe.com/billing/taxes/tax-rates) (Stripe)
 3. [Opinion of the Advocate General, J D Wetherspoon plc v HMRC, Case C-302/07](https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX%3A62007CC0302) (Court of Justice of the European Union)
+4. [Java SE 21 java.math.BigDecimal (divide, setScale)](https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/math/BigDecimal.html) (Oracle)
 
 ## TAX-3: Tax rates held as binary floats or applied with imprecise percentage arithmetic
 
@@ -137,6 +163,16 @@ tax_minor = int((Decimal(amount_minor) * BPS / Decimal(10000)).quantize(
                 Decimal("1"), rounding=ROUND_HALF_UP))     # 1650 cents
 # if you keep a Decimal rate, build it from a string, never from a float:
 rate = Decimal("0.0825")      # not Decimal(0.0825), which is 0.082500000000000004...
+```
+
+```java
+// Java: rate as integer basis points, amount as long minor units, one explicit rounding.
+long BPS = 825;               // 8.25%, exact integer, not the double 0.0825
+long amountMinor = 19999;     // 199.99 as integer cents
+long taxMinor = BigDecimal.valueOf(amountMinor).multiply(BigDecimal.valueOf(BPS))
+    .divide(BigDecimal.valueOf(10000), 0, RoundingMode.HALF_UP).longValueExact();   // 1650 cents
+// if you keep a BigDecimal rate, build it from a String, never new BigDecimal(0.0825) (STO-7).
+BigDecimal rate = new BigDecimal("0.0825");
 ```
 
 **False positives**
