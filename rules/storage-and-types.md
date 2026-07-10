@@ -171,6 +171,7 @@ Store currency with every amount: a currency_code column (ISO 4217 alpha code) n
 
 - Hardcoded 100 as the minor-unit divisor/multiplier for every currency (`amount/100`, `cents = dollars*100`) with no per-currency exponent lookup.
 - `toFixed(2)`, `round(x, 2)`, `Math.round(x*100)/100`, or a number format with 2 fixed decimals applied to all money regardless of currency.
+- Java: a hardcoded `.setScale(2, ...)`, `movePointRight(2)`, or `* 100` on every amount instead of `Currency.getInstance(code).getDefaultFractionDigits()`, or code that assumes the return of `getDefaultFractionDigits()` is always 2 and never handles the `-1` returned for pseudo-currencies (gold, IMF SDR).
 - Validation or DB scale that assumes exactly 2 fractional digits for all amounts (DECIMAL(_,2) everywhere, see STO-2).
 - Sending amounts to a payment API in the wrong scale: 1000 for JPY (would mean 1000 yen, not 10) or 1000 for BHD instead of the required 3-decimal minor units.
 - No mapping anywhere from currency code to its ISO 4217 minor-unit exponent.
@@ -182,7 +183,13 @@ ISO 4217 assigns each currency a minor-unit exponent that is not always 2: 0 for
 
 **Fix**
 
-Drive scaling from a currency-to-minor-unit-exponent table (ISO 4217, maintained by SIX Group on behalf of ISO), not a hardcoded 100. Look up the exponent per currency to convert between major and minor units, to set validation and DB scale, and before formatting for display or for a gateway. Honor each processor's stated rules: Stripe zero-decimal currencies take the amount as-is, Adyen wants three-decimal amounts in 1000-based minor units, PayPal forbids decimals on JPY/HUF/TWD. Standard libraries (Intl.NumberFormat, ICU, `java.util.Currency.getDefaultFractionDigits`, py-moneyed) already carry these exponents; use them instead of a literal.
+Drive scaling from a currency-to-minor-unit-exponent table (ISO 4217, maintained by SIX Group on behalf of ISO), not a hardcoded 100. Look up the exponent per currency to convert between major and minor units, to set validation and DB scale, and before formatting for display or for a gateway. Honor each processor's stated rules: Stripe zero-decimal currencies take the amount as-is, Adyen wants three-decimal amounts in 1000-based minor units, PayPal forbids decimals on JPY/HUF/TWD. Standard libraries (Intl.NumberFormat, ICU, `java.util.Currency.getDefaultFractionDigits`, py-moneyed) already carry these exponents; use them instead of a literal. In Java, read the exponent per currency and handle the `-1` pseudo-currency case rather than assuming 2.
+
+```java
+int digits = Currency.getInstance(code).getDefaultFractionDigits();  // USD 2, JPY 0, BHD 3
+if (digits < 0) throw new IllegalArgumentException(code + " has no minor unit");  // XAU, XDR
+BigDecimal amount = major.setScale(digits, RoundingMode.HALF_UP);    // never a hardcoded 2
+```
 
 **False positives**
 
@@ -197,6 +204,7 @@ Drive scaling from a currency-to-minor-unit-exponent table (ISO 4217, maintained
 2. [Stripe Documentation: Currencies (zero-decimal)](https://docs.stripe.com/currencies) (Stripe)
 3. [Adyen: Currency codes and minor units](https://docs.adyen.com/development-resources/currency-codes) (Adyen)
 4. [PayPal REST API: Currency codes](https://developer.paypal.com/api/rest/reference/currency-codes/) (PayPal)
+5. [Java SE 21 java.util.Currency](https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/Currency.html) (Oracle)
 
 ## STO-6: Amounts that outgrow the numeric type
 
