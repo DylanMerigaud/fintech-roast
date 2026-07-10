@@ -231,17 +231,18 @@ Size the type for the largest total the system can ever reach in minor units, in
 **What to detect**
 
 - Python: `Decimal(0.1)`, `Decimal(amount)` where `amount` is a `float`, or `Decimal.from_float(...)` on a money value, instead of `Decimal("0.1")` or `Decimal(str(amount))`.
+- Java: `new BigDecimal(0.1)` or `new BigDecimal(doubleAmount)` (the `BigDecimal(double)` constructor), instead of `new BigDecimal("0.1")` or `BigDecimal.valueOf(amount)`. The same trap hits `float`, since it widens to `double` before the constructor sees it.
 - A float literal or a float variable passed into a decimal constructor anywhere on a money path, so the value is already wrong before any arithmetic or rounding runs.
 - Parsing an amount with `float(...)` first and only wrapping it in `Decimal` afterward (precision is lost at the `float()` call; the `Decimal` just freezes the error).
 - A helper that accepts a `float` amount and returns a `Decimal`, which looks safe at the call site but launders a lossy value into an exact-looking one.
 
 **Why it breaks**
 
-An exact-decimal type only helps if it is fed an exact value. A binary float cannot represent most decimal fractions, so constructing a decimal directly from a float copies the float's error into the decimal verbatim: Python's `Decimal(0.1)` is `0.1000000000000000055511151231257827021181583404541015625`, not `0.1`, because `0.1` stopped being `0.1` the moment it became a `float`. The decimal then carries that noise into every downstream sum, rounding, and comparison, and because it is now a "precise" type the error looks authoritative and survives review. The same trap exists in any language where an exact type has a float constructor. Keeping money out of `float` entirely, and building the decimal from a string, is the only reliable fix.
+An exact-decimal type only helps if it is fed an exact value. A binary float cannot represent most decimal fractions, so constructing a decimal directly from a float copies the float's error into the decimal verbatim: Python's `Decimal(0.1)` is `0.1000000000000000055511151231257827021181583404541015625`, not `0.1`, because `0.1` stopped being `0.1` the moment it became a `float`. The decimal then carries that noise into every downstream sum, rounding, and comparison, and because it is now a "precise" type the error looks authoritative and survives review. Java has the same trap and the standard library warns about it directly: its own docs say the `BigDecimal(double)` constructor is "somewhat unpredictable" and that `new BigDecimal(0.1)` is "actually equal to 0.1000000000000000055511151231257827021181583404541015625", the identical error, because the `double` passed in already stopped being 0.1. The trap exists in any language where an exact type has a float constructor. Keeping money out of `float`/`double` entirely, and building the decimal from a string, is the only reliable fix.
 
 **Fix**
 
-Construct decimals from strings, never from floats. Parse external input straight into `Decimal("...")`, and forbid `float` anywhere on the money path so a float can never reach the constructor. Use `Decimal(str(x))` only when the source is already a correct decimal string or an integer. If a value genuinely arrives as a float from a legacy boundary, fix that boundary; a later `Decimal(...)` cannot recover the lost digits.
+Construct decimals from strings, never from floats. Parse external input straight into `Decimal("...")`, and forbid `float` anywhere on the money path so a float can never reach the constructor. Use `Decimal(str(x))` only when the source is already a correct decimal string or an integer. In Java, prefer the `BigDecimal(String)` constructor, which Oracle explicitly recommends over `BigDecimal(double)`; when a value is only available as a primitive, use `BigDecimal.valueOf(double)`, which routes through `Double.toString` and so yields `0.1` rather than the raw binary expansion. The `BigDecimal(int)`/`BigDecimal(long)` constructors are exact and fine (integer minor units). If a value genuinely arrives as a float from a legacy boundary, fix that boundary; a later `Decimal(...)` or `new BigDecimal(...)` cannot recover the lost digits.
 
 ```python
 from decimal import Decimal
@@ -250,14 +251,23 @@ Decimal(0.1)          # 0.1000000000000000055... (the float's error, preserved)
 Decimal(1999)         # exact: an integer is fine (minor units)
 ```
 
+```java
+new BigDecimal("0.1")        // 0.1 exactly (the recommended constructor)
+new BigDecimal(0.1)          // 0.1000000000000000055... (the double's error, preserved)
+BigDecimal.valueOf(0.1)      // 0.1 (goes via Double.toString, not the raw double)
+new BigDecimal(1999)         // exact: an int/long is fine (minor units)
+```
+
 **False positives**
 
 - `Decimal(str(x))` or `Decimal(x)` where `x` is known to be a clean decimal string or an integer, and the conversion is deliberate and documented.
+- `BigDecimal.valueOf(x)` on a `double`, or the `BigDecimal(int)`/`BigDecimal(long)`/`BigDecimal(String)` constructors: these are the recommended safe conversions, not the flagged `BigDecimal(double)` constructor.
 - Non-money quantities (a scientific measurement, a ratio, a weight) where the float origin is acceptable and the value never becomes an amount.
-- A test that intentionally builds `Decimal(0.1)` to demonstrate the very trap this rule describes.
+- A test that intentionally builds `Decimal(0.1)` or `new BigDecimal(0.1)` to demonstrate the very trap this rule describes.
 - A value coming from a decimal-typed database column via a driver that already returns `Decimal`, where no `float` is involved despite a `Decimal(...)` call nearby.
 
 **Sources**
 
 1. [decimal, Decimal fixed-point and floating-point arithmetic](https://docs.python.org/3/library/decimal.html) (Python Software Foundation)
-2. [What Every Computer Scientist Should Know About Floating-Point Arithmetic](https://docs.oracle.com/cd/E19957-01/806-3568/ncg_goldberg.html) (David Goldberg, Oracle mirror of ACM Computing Surveys 1991)
+2. [Java SE 21 java.math.BigDecimal](https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/math/BigDecimal.html) (Oracle)
+3. [What Every Computer Scientist Should Know About Floating-Point Arithmetic](https://docs.oracle.com/cd/E19957-01/806-3568/ncg_goldberg.html) (David Goldberg, Oracle mirror of ACM Computing Surveys 1991)
