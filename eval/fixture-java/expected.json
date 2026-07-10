@@ -1,0 +1,320 @@
+{
+  "fixture": "eval/fixture-java",
+  "notes": "Deliberately-buggy Java (Spring Boot + JPA + H2) billing fixture, full coverage across all 10 domains (STO, ROU, IDE, LED, FX, TIM, AGG, TAX, API, TST). Green by design: mvn test passes (31 tests) because every fixture input is round-number and single-currency USD and every test exercises a happy path (one webhook delivery, one sequential balance update, no fractional cents), so the planted bugs stay dormant. Mirrors eval/fixture-py and eval/fixture. Bug-naming comments were stripped so an auditor finds the bugs blind. Files are basenames; the scorer matches a finding when rule id is equal AND finding.file ends with one of these (so a deep path like .../billing/Money.java matches Money.java).",
+  "planted": [
+    {
+      "key": "P01",
+      "rule": "API-3",
+      "files": [
+        "Money.java"
+      ],
+      "note": "parseAmount coerces a money string with Double.parseDouble instead of BigDecimal, inexact binary on money input"
+    },
+    {
+      "key": "P02",
+      "rule": "STO-1",
+      "files": [
+        "Money.java"
+      ],
+      "note": "money flows through double everywhere (parseAmount returns double, roundMoney/fromMinorUnits operate on double) instead of BigDecimal or integer minor units"
+    },
+    {
+      "key": "P03",
+      "rule": "STO-5",
+      "files": [
+        "Money.java"
+      ],
+      "note": "toMinorUnits and fromMinorUnits hardcode *100 and /100 for every currency, no ISO 4217 exponent lookup (breaks JPY and BHD)"
+    },
+    {
+      "key": "P04",
+      "rule": "ROU-1",
+      "files": [
+        "Money.java"
+      ],
+      "note": "roundMoney is the shared money rounding helper and uses Math.round(value*100)/100.0 on a double, no explicit RoundingMode"
+    },
+    {
+      "key": "P05",
+      "rule": "STO-7",
+      "files": [
+        "Money.java"
+      ],
+      "note": "toDecimal builds new BigDecimal(amount) from a double argument, inheriting the inexact binary tail instead of new BigDecimal(String)"
+    },
+    {
+      "key": "P06",
+      "rule": "ROU-3",
+      "files": [
+        "Invoice.java"
+      ],
+      "note": "invoiceTotal rounds each intermediate step then compounds: round the discounted subtotal, then round the taxed amount, so order and intermediate rounding are baked in"
+    },
+    {
+      "key": "P07",
+      "rule": "ROU-4",
+      "files": [
+        "Invoice.java"
+      ],
+      "note": "bundleLineTotal divides before multiplying: a per-unit price rounded from bundleTotal/quantity is then multiplied back by quantity"
+    },
+    {
+      "key": "P08",
+      "rule": "ROU-2",
+      "files": [
+        "Split.java"
+      ],
+      "note": "splitProportionally independently rounds each share with no residual reconciliation, so parts do not sum back to total on non-clean ratios"
+    },
+    {
+      "key": "P09",
+      "rule": "TAX-1",
+      "files": [
+        "Tax.java"
+      ],
+      "note": "invoiceTaxByLines rounds tax per line while invoiceTaxOnTotal rounds on the invoice total, with no reconciliation between the two paths"
+    },
+    {
+      "key": "P10",
+      "rule": "TAX-2",
+      "files": [
+        "Tax.java"
+      ],
+      "note": "extractTaxFromGross computes embedded tax as gross*rate instead of gross - gross/(1+rate), an inclusive versus exclusive mixup"
+    },
+    {
+      "key": "P11",
+      "rule": "TAX-3",
+      "files": [
+        "Tax.java"
+      ],
+      "note": "SALES_TAX_RATE = 0.0825 stored as a bare double and multiplied on doubles, no BigDecimal rate"
+    },
+    {
+      "key": "P12",
+      "rule": "FX-1",
+      "files": [
+        "Fx.java"
+      ],
+      "note": "refundInOriginalCurrency assumes a lossless round-trip, converting back via independently rounded rates (0.92 vs 1.087, not 1/rate)"
+    },
+    {
+      "key": "P13",
+      "rule": "FX-2",
+      "files": [
+        "Fx.java"
+      ],
+      "note": "RATES is a mutable static map used as the rate source with no value, source, or timestamp captured on any converted amount"
+    },
+    {
+      "key": "P14",
+      "rule": "FX-3",
+      "files": [
+        "Fx.java"
+      ],
+      "note": "settleInvoice overwrites the invoice total and currency in place, dropping the original billed amount and currency"
+    },
+    {
+      "key": "P15",
+      "rule": "FX-4",
+      "files": [
+        "Fx.java"
+      ],
+      "note": "totalRevenue adds invoice totals across currencies with no currency guard, summing USD, EUR, and MXN as one unit"
+    },
+    {
+      "key": "P16",
+      "rule": "TIM-2",
+      "files": [
+        "Interest.java"
+      ],
+      "note": "daysBetween computes (end.getEpochSecond() - start.getEpochSecond())/86400, naive of DST so any non-86400s day is miscounted, instead of ChronoUnit.DAYS.between"
+    },
+    {
+      "key": "P17",
+      "rule": "TIM-4",
+      "files": [
+        "Interest.java"
+      ],
+      "note": "accruedInterest uses a hardcoded annualRate/365 daily rate with no day-count convention"
+    },
+    {
+      "key": "P18",
+      "rule": "TIM-3",
+      "files": [
+        "Interest.java"
+      ],
+      "note": "transactionsInPeriod treats both endpoints as inclusive (>= start and <= end), so a transaction on a shared boundary is double-counted across consecutive periods"
+    },
+    {
+      "key": "P19",
+      "rule": "AGG-1",
+      "files": [
+        "Reports.java"
+      ],
+      "note": "sumAmounts totals money by adding raw doubles in a loop, accumulating binary-float error instead of BigDecimal or minor units"
+    },
+    {
+      "key": "P20",
+      "rule": "AGG-3",
+      "files": [
+        "Reports.java"
+      ],
+      "note": "totalAllPages paginates with limit and offset over live data, so inserts or deletes between fetches make the aggregate drift"
+    },
+    {
+      "key": "P21",
+      "rule": "STO-1",
+      "files": [
+        "schema.sql",
+        "LedgerEntry.java",
+        "WebhookEvent.java"
+      ],
+      "note": "money columns typed DOUBLE PRECISION and REAL (subtotal, tax, total, unit_price, payment amount, webhook amount, ledger amount); the JPA entities map them to double fields"
+    },
+    {
+      "key": "P22",
+      "rule": "STO-2",
+      "files": [
+        "schema.sql",
+        "Account.java"
+      ],
+      "note": "accounts.balance is NUMERIC(6,2) / @Column(precision=6, scale=2), caps at 9999.99 so a real running balance overflows"
+    },
+    {
+      "key": "P23",
+      "rule": "STO-4",
+      "files": [
+        "schema.sql",
+        "Account.java",
+        "LedgerEntry.java",
+        "WebhookEvent.java"
+      ],
+      "note": "no currency column or field anywhere amounts are stored (accounts, invoices, payments, webhook_events, ledger_entries)"
+    },
+    {
+      "key": "P24",
+      "rule": "IDE-4",
+      "files": [
+        "schema.sql",
+        "WebhookEvent.java"
+      ],
+      "note": "payments.external_ref and webhook_events.event_id have no UNIQUE constraint (no @Column(unique=true)), so duplicate provider refs and event ids insert fine"
+    },
+    {
+      "key": "P25",
+      "rule": "TIM-1",
+      "files": [
+        "schema.sql",
+        "LedgerEntry.java",
+        "WebhookEvent.java"
+      ],
+      "note": "financial instants typed TIMESTAMP without time zone / mapped to LocalDateTime (issued_at, received_at, created_at)"
+    },
+    {
+      "key": "P26",
+      "rule": "IDE-1",
+      "files": [
+        "WebhookService.java",
+        "WebhookController.java"
+      ],
+      "note": "handlePaymentSucceeded credits with no event-id dedup before the side effect, and the @PostMapping(/webhooks) controller has no guard either, so a redelivered webhook double-credits"
+    },
+    {
+      "key": "P27",
+      "rule": "IDE-2",
+      "files": [
+        "WebhookService.java"
+      ],
+      "note": "chargeCustomer retries the POST to /charges with no Idempotency-Key header, a timed-out-but-successful first attempt is charged again on retry"
+    },
+    {
+      "key": "P28",
+      "rule": "IDE-3",
+      "files": [
+        "Store.java"
+      ],
+      "note": "creditAccount and debitAccount do a findById read-modify-write on the balance with no @Version, no row lock, and no atomic UPDATE"
+    },
+    {
+      "key": "P29",
+      "rule": "LED-1",
+      "files": [
+        "Ledger.java"
+      ],
+      "note": "correctEntry mutates the posted entry amount in place (setAmount) instead of appending a reversing entry"
+    },
+    {
+      "key": "P30",
+      "rule": "LED-2",
+      "files": [
+        "Ledger.java"
+      ],
+      "note": "postEntry records a single signed leg, no paired debit and credit, no shared transaction id, so debits and credits are never forced to balance"
+    },
+    {
+      "key": "P31",
+      "rule": "LED-3",
+      "files": [
+        "Ledger.java"
+      ],
+      "note": "the account balance is a cached mutable column (Account.balance) incremented separately, never derived from summing the entries"
+    },
+    {
+      "key": "P32",
+      "rule": "LED-4",
+      "files": [
+        "Ledger.java",
+        "LedgerEntry.java"
+      ],
+      "note": "entries and corrections carry no actor or reason, so a posted movement cannot say who moved the money or why"
+    },
+    {
+      "key": "P33",
+      "rule": "API-1",
+      "files": [
+        "Api.java"
+      ],
+      "note": "invoiceResponse serializes total as a bare JSON number (double via fromMinorUnits) and drops the currency from the payload"
+    },
+    {
+      "key": "P34",
+      "rule": "API-4",
+      "files": [
+        "Api.java"
+      ],
+      "note": "invoiceResponse returns decimal dollars while accountBalanceResponse returns integer cents, two endpoints disagree on the money unit with no canonical shape"
+    },
+    {
+      "key": "P35",
+      "rule": "TST-1",
+      "files": [
+        "StoreTest.java",
+        "LedgerTest.java",
+        "WebhookServiceTest.java",
+        "SplitTest.java"
+      ],
+      "note": "no property-based tests, no jqwik @Property, so invariants like credited-once and sum-of-parts-equals-total are never generated against"
+    },
+    {
+      "key": "P36",
+      "rule": "TST-2",
+      "files": [
+        "MoneyTest.java",
+        "TaxTest.java",
+        "InvoiceTest.java"
+      ],
+      "note": "every fixture amount is round (100, 50, 60, 40, 250.00, 10000), no fractional-cent or .xx5 tie case, so no rounding mode is ever distinguished"
+    },
+    {
+      "key": "P37",
+      "rule": "TST-3",
+      "files": [
+        "MoneyTest.java",
+        "FxTest.java",
+        "TaxTest.java"
+      ],
+      "note": "single happy currency USD, no JPY or BHD zero- or three-decimal case, no negative amount, no refund or reversal"
+    }
+  ]
+}
