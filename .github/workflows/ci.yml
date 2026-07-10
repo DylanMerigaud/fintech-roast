@@ -42,6 +42,19 @@ jobs:
       - run: pip install pytest
       - run: python3 -m pytest -q
 
+  fixture-py-clean:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: eval/fixture-py-clean
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pytest hypothesis
+      - run: python3 -m pytest -q
+
   fixture-java:
     runs-on: ubuntu-latest
     defaults:
