@@ -41,7 +41,8 @@ findings.sort(key=lambda f: (SEV_ORDER[f["severity"]], f["rule"], f["file"], f["
 
 def wrap(text, indent):
     # Repo convention (see CONTRIBUTING.md): plain ASCII punctuation everywhere.
-    text = text.replace(" — ", " - ").replace("—", " - ").replace("–", "-")
+    em, en = "\u2014", "\u2013"  # em/en dash; escaped, the ASCII policy covers this file too
+    text = text.replace(f" {em} ", " - ").replace(em, " - ").replace(en, "-")
     return textwrap.fill(
         text, width=96, initial_indent=indent, subsequent_indent=indent
     )
