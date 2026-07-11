@@ -135,11 +135,17 @@ The per-domain runs are a scoped audit (each auditor is pointed at its domain's 
 are not directly comparable to the TypeScript cold scan; a cold scan is expected to be lower.
 The honest version, including the misses and the limits of each run, stays in the repo.
 
-The fixtures are bugs we planted ourselves. The first run on a real production codebase
-(with permission, anonymized) is written up in
-[`eval/FIELD-REPORT-1.md`](eval/FIELD-REPORT-1.md): 36 findings emitted, 18 confirmed
-(1 critical), 14 refuted by the adversarial pass before reporting, and the lesson that a
-scoped roast of a well-built core reports clean while the full surface does not.
+The fixtures are bugs we planted ourselves. Two runs on real production code are written
+up alongside them:
+
+- [`eval/FIELD-REPORT-1.md`](eval/FIELD-REPORT-1.md): a private codebase (with permission,
+  anonymized). 36 findings emitted, 18 confirmed (1 critical), 14 refuted by the
+  adversarial pass, and the lesson that a scoped roast of a well-built core reports clean
+  while the full surface does not.
+- [`eval/FIELD-REPORT-2.md`](eval/FIELD-REPORT-2.md): [medusajs/medusa](https://github.com/medusajs/medusa)
+  at a pinned commit, so it is fully reproducible. 16 emitted, 4 confirmed (a
+  check-then-act concurrency cluster), 2 likely, 10 refuted, several of the refutations
+  turning on the same false-positive notes the rulebook documents.
 
 ## Contributing
 
