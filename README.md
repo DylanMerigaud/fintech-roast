@@ -8,16 +8,46 @@ An agent that roasts the code that touches money.
 ![fintech-roast running over the eval fixture](assets/roast-demo.gif)
 
 <sub>A replay of the run scored in [eval/RESULTS.md](eval/RESULTS.md) (53 findings over the
-planted-bug fixture). Real rule ids and file lines; the report shape the plugin prints.</sub>
+planted-bug fixture). Real rule ids and file lines; the full report is checked in at
+[docs/sample-report.md](docs/sample-report.md).</sub>
 
 It scans a repository for the surfaces where money lives (schemas, webhooks, calculation
 code, serialization), audits each against a sourced rulebook of how money-handling code
 actually breaks, adversarially verifies every finding, and reports what survives with the
-rule and the sources behind it.
+rule and the sources behind it. It is read-only: it never edits your code, opens PRs, or
+files issues.
 
-Building in public. The rulebook, the plugin, and three benchmarks are here. The rulebook
-gives per-language detection and fixes for JavaScript/TypeScript, Python, and Java (Spring
-Boot / JPA / BigDecimal), each backed by its own eval fixture. Results live in [`eval/`](eval/).
+## Quickstart
+
+It is a [Claude Code](https://claude.com/claude-code) plugin, so it runs on your own Claude
+session; there is no API key to configure.
+
+```
+/plugin marketplace add DylanMerigaud/fintech-roast
+/plugin install fintech-roast@fintech-roast
+```
+
+Then, in the repo you want audited:
+
+```
+/fintech-roast:roast           # full-repo audit
+/fintech-roast:roast diff      # only the files changed on this branch
+/fintech-roast:roast src/billing   # a specific path
+```
+
+What to expect before you run it:
+
+- **Output.** [docs/sample-report.md](docs/sample-report.md) is a complete, real report
+  (the run 1 findings on the TypeScript fixture). That shape, with rule
+  citations, is exactly what you get. "No findings" is a valid outcome; it does not force
+  findings out of a repo that has no money code.
+- **Cost and time.** A full-repo roast fans out one auditor per rule domain plus one
+  verifier per domain that found something, so up to ~20 subagent runs on your session.
+  On a mid-size repo, budget tens of minutes and a meaningful slice of your usage. `diff`
+  mode audits only what changed on your branch and is the cheap, day-to-day invocation.
+- **A guaranteed first run.** If you want to see it work before pointing it at your own
+  code, clone this repo and run `/fintech-roast:roast eval/fixture`. The fixture has 37
+  planted bugs, so the first run cannot come back empty.
 
 ## Why this exists, and what it is not
 
@@ -33,6 +63,10 @@ The authority is meant to come from findings you can check and rules you can cit
 a claim of expertise. Findings are rule-based and adversarially verified by a second agent;
 they are not a substitute for a human who owns the money path. Read the cited rule before
 you act on a finding. Every rule documents where it cries wolf.
+
+Building in public: the rulebook, the plugin, and the benchmarks are all here, misses
+included. Languages covered today are JavaScript/TypeScript, Python, and Java (Spring Boot
+/ JPA / BigDecimal), each backed by its own eval fixture; Go and Ruby are not covered yet.
 
 ## The rulebook
 
@@ -53,19 +87,23 @@ sources. Format contract and severity scale in [`rules/README.md`](rules/README.
 | [API and serialization](rules/api-and-serialization.md) | API-1..4 | money as a JSON number, GraphQL Float, parseFloat on input, no canonical cross-service shape |
 | [Testing money code](rules/testing.md) | TST-1..3 | no property tests on invariants, round-number fixtures, one happy currency |
 
-## The plugin
+## How a roast works
 
-A Claude Code plugin. It adds a `/fintech-roast:roast` skill that scans for money surfaces,
-fans out one auditor per domain, adversarially verifies the findings, and reports with rule
-citations. It runs on your own Claude session, so there is no API key to configure.
+The `/fintech-roast:roast` skill scans the scope for money surfaces, fans out one auditor
+subagent per rule domain that has surface, then spawns an adversarial verifier per domain
+whose only job is to refute the findings. Refuted findings are dropped; what survives is
+reported with severity, a confidence tier from the verifier, evidence, a fix direction,
+and the rule citation. The pipeline and the report format live in
+[`skills/roast/SKILL.md`](skills/roast/SKILL.md).
 
-```
-/plugin marketplace add DylanMerigaud/fintech-roast
-/plugin install fintech-roast@fintech-roast
-/fintech-roast:roast
-```
+### Run it on every PR
 
-It is read-only. It never edits your code, opens PRs, or files issues.
+[`examples/fintech-roast.yml`](examples/fintech-roast.yml) is a GitHub Actions recipe that
+runs the diff-scoped roast on pull requests touching money paths and posts the report as a
+PR comment, via [claude-code-action](https://github.com/anthropics/claude-code-action).
+Two things to know: in CI it bills per-token against an `ANTHROPIC_API_KEY` repo secret
+(not a Claude subscription), and the recipe is young; if it misbehaves,
+[open an issue](https://github.com/DylanMerigaud/fintech-roast/issues).
 
 ## Evaluation
 
@@ -83,11 +121,14 @@ with its own method and caveats so the numbers are not read out of context:
 | --- | --- | --- | --- | --- |
 | TypeScript | [`eval/fixture/`](eval/fixture/) | cold full-repo scan | 86 percent | [RESULTS.md](eval/RESULTS.md) |
 | Python | [`eval/fixture-py/`](eval/fixture-py/) | audited per domain | 37 / 37 | [RESULTS-py.md](eval/RESULTS-py.md) |
+| Python, blind mixed | [`eval/fixture-py-mixed.README.md`](eval/fixture-py-mixed.README.md) | blind, clean and buggy files mixed | 86 percent, 0 surviving false positives | [RESULTS-py-mixed.md](eval/RESULTS-py-mixed.md) |
 | Java | [`eval/fixture-java/`](eval/fixture-java/) | audited per domain | 36 / 37 | [RESULTS-java.md](eval/RESULTS-java.md) |
 
 The per-domain runs are a scoped audit (each auditor is pointed at its domain's files) and so
 are not directly comparable to the TypeScript cold scan; a cold scan is expected to be lower.
-The honest version, including the misses and the limits of each run, stays in the repo.
+The honest version, including the misses and the limits of each run, stays in the repo. All
+of these are runs on fixtures we planted ourselves; results on real-world repos are the next
+milestone and will be published the same way, misses and false positives included.
 
 ## Contributing
 
