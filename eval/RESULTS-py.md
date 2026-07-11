@@ -70,6 +70,6 @@ python3 eval/score.py --expected eval/fixture-py/expected.json eval/run-1-py-fin
 
 ## Next
 
-- Add a small clean-code fixture (correct money handling) and roast it to measure false positives.
-  That exercises the adversarial verifier, the dimension this all-planted run cannot test.
+- DONE: the clean-code fixture (`fixture-py-clean/`) that measures false positives is built and run.
+  See `RESULTS-py-clean.md`: zero false positives across all 10 domains on correct money code.
 - A cold full-repo Python scan for a figure directly comparable to the TypeScript 86 percent.

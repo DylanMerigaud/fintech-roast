@@ -1,0 +1,5 @@
+{
+  "fixture": "fixture-py-clean",
+  "notes": "Clean (correct) twin of fixture-py. 10 domain auditors, waves of <=3, each scoped to its domain rule file plus the clean fixture files where that domain applies. No planted bugs, so any finding is a candidate false positive.",
+  "findings": []
+}
