@@ -105,6 +105,13 @@ Two things to know: in CI it bills per-token against an `ANTHROPIC_API_KEY` repo
 (not a Claude subscription), and the recipe is young; if it misbehaves,
 [open an issue](https://github.com/DylanMerigaud/fintech-roast/issues).
 
+### Roast every commit
+
+[`examples/post-commit-roast.sh`](examples/post-commit-roast.sh) is a git post-commit hook
+that roasts each commit's diff in the background on your own Claude session, using a
+`fintech-roast.baseline` git config key as an incremental marker so every commit is
+roasted exactly once. Opt-in per clone; each run spends your session usage.
+
 ## Evaluation
 
 [`eval/`](eval/) holds a deliberately buggy billing service with money bugs planted across
@@ -126,9 +133,13 @@ with its own method and caveats so the numbers are not read out of context:
 
 The per-domain runs are a scoped audit (each auditor is pointed at its domain's files) and so
 are not directly comparable to the TypeScript cold scan; a cold scan is expected to be lower.
-The honest version, including the misses and the limits of each run, stays in the repo. All
-of these are runs on fixtures we planted ourselves; results on real-world repos are the next
-milestone and will be published the same way, misses and false positives included.
+The honest version, including the misses and the limits of each run, stays in the repo.
+
+The fixtures are bugs we planted ourselves. The first run on a real production codebase
+(with permission, anonymized) is written up in
+[`eval/FIELD-REPORT-1.md`](eval/FIELD-REPORT-1.md): 36 findings emitted, 18 confirmed
+(1 critical), 14 refuted by the adversarial pass before reporting, and the lesson that a
+scoped roast of a well-built core reports clean while the full surface does not.
 
 ## Contributing
 

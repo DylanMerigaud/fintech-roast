@@ -11,13 +11,16 @@ false accusation costs more credibility than three missed bugs.
 Scope, resolved in this order:
 
 - `$ARGUMENTS` is `diff`, `branch`, or `pr`: audit only the files changed on this branch.
-  Resolve the default branch (`git symbolic-ref refs/remotes/origin/HEAD`, falling back to
-  `main` then `master`), then collect changed files: `git diff --name-only
-  $(git merge-base HEAD <default>)..HEAD`, plus uncommitted changes (`git diff --name-only
-  HEAD`) and untracked files (`git ls-files --others --exclude-standard`). Auditors may
-  read any file for context (a changed call site can be broken by an unchanged callee),
-  but every finding must be anchored at a changed file. If no files changed, say so and
-  stop. This is the cheap, fast mode meant for day-to-day and CI use.
+  If `git config fintech-roast.baseline` returns a commit, diff against that commit (an
+  incremental-roast baseline maintained by the user's tooling, e.g. the post-commit hook
+  in `examples/post-commit-roast.sh`; you never set or update it yourself). Otherwise
+  resolve the default branch (`git symbolic-ref refs/remotes/origin/HEAD`, falling back to
+  `main` then `master`) and diff against the merge-base: `git diff --name-only
+  $(git merge-base HEAD <default>)..HEAD`. Either way, add uncommitted changes (`git diff
+  --name-only HEAD`) and untracked files (`git ls-files --others --exclude-standard`).
+  Auditors may read any file for context (a changed call site can be broken by an
+  unchanged callee), but every finding must be anchored at a changed file. If no files
+  changed, say so and stop. This is the cheap, fast mode meant for day-to-day and CI use.
 - `$ARGUMENTS` is anything else: a path or a hint about what to audit.
 - No arguments: the repository root.
 
