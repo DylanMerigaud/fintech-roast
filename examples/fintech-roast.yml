@@ -1,0 +1,56 @@
+# Roast every PR that touches money.
+#
+# Copy this file to .github/workflows/fintech-roast.yml in your repo and add an
+# ANTHROPIC_API_KEY secret (console.anthropic.com). Note the billing model: in CI the
+# roast runs on that API key at per-token prices, not on anyone's Claude subscription.
+# A diff-scoped roast is the cheap mode, but it is not free; the paths filter below
+# keeps it off PRs that cannot touch money.
+#
+# This is a recipe, not a supported product surface. If it misbehaves, open an issue:
+# https://github.com/DylanMerigaud/fintech-roast/issues
+
+name: fintech-roast
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+    # Tune to where money lives in your repo, or delete to run on every PR.
+    paths:
+      - "**/billing/**"
+      - "**/payments/**"
+      - "**/invoic*/**"
+      - "**/ledger/**"
+      - "**/*money*"
+      - "**/migrations/**"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  roast:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Diff mode needs the merge-base with the default branch.
+          fetch-depth: 0
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          plugin_marketplaces: |
+            https://github.com/DylanMerigaud/fintech-roast
+          plugins: |
+            fintech-roast@fintech-roast
+          prompt: |
+            /fintech-roast:roast diff
+
+            When the roast is done, post the full report as a single comment on
+            PR #${{ github.event.pull_request.number }} with
+            `gh pr comment ${{ github.event.pull_request.number }} --body-file <report>`.
+            If there are no findings, post that: it is a valid outcome. Do not modify
+            any file, and do not open issues or PRs.
+          claude_args: "--max-turns 50"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
