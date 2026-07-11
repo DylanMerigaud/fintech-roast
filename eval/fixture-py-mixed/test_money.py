@@ -39,7 +39,8 @@ def test_from_minor_units_round_trips():
 
 def test_round_money_explicit_half_up():
 
-    assert money.round_money(Decimal("2.675")) == Decimal("2.68")
+
+    assert money.round_money(Decimal("2.665")) == Decimal("2.67")
 
 
 def test_invoice_total_fractional_cents():

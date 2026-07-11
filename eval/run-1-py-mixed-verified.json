@@ -1,0 +1,7 @@
+{
+  "notes": "Adversarial verifier verdicts on the 2 findings that landed on CLEAN files. The 32 findings on buggy files were not re-verified (they hit planted bugs; the verifier refutes ~0 on real bugs, same option-B rationale as prior runs).",
+  "verdicts": [
+    {"rule": "TAX-2", "file": "eval/fixture-py-mixed/tax.py", "line": 43, "verdict": "refuted", "reason": "tax = round(gross - gross/(1+rate)) is the exact complement of net; round(q)+round(gross-q)==gross for every cent-precision gross under both HALF_UP and HALF_EVEN (0 mismatches in ~1M tested). This is the inclusive back-calc the rule explicitly blesses, not an independent-rounding break. TRUE FALSE POSITIVE, refuted."},
+    {"rule": "TST-2", "file": "eval/fixture-py-mixed/test_money.py", "line": 42, "verdict": "confirmed", "reason": "2.675 is a tie with an odd preceding digit, so it rounds to 2.68 under BOTH HALF_UP and HALF_EVEN; the test named explicit_half_up cannot distinguish the modes and no other test pins a discriminating .xx5 tie. A real latent gap in the clean fixture's own test suite, not a false positive."}
+  ]
+}

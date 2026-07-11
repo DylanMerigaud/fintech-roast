@@ -1,0 +1,1 @@
+{"domain": "TST", "findings": [{"rule": "TST-2", "file": "eval/fixture-py-mixed/test_money.py", "line": 42, "evidence": "assert money.round_money(Decimal(\"2.675\")) == Decimal(\"2.68\")", "severity": "medium", "confidence": "medium", "fix": "add a tie where HALF_UP and HALF_EVEN diverge (1.005); 2.675 passes under both modes"}]}

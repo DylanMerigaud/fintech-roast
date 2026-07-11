@@ -1,0 +1,1 @@
+{"domain": "API", "findings": [{"rule": "API-3", "file": "eval/fixture-py-mixed/money.py", "line": 12, "evidence": "def parse_amount(input: str) -> float: return float(input)", "severity": "high", "confidence": "high", "fix": "validate then Decimal(input), never float()"}]}

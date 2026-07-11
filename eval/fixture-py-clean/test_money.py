@@ -40,8 +40,10 @@ def test_from_minor_units_round_trips():
 
 
 def test_round_money_explicit_half_up():
-    # A true half rounds up under ROUND_HALF_UP, deterministically.
-    assert money.round_money(Decimal("2.675")) == Decimal("2.68")
+    # A true half at an even preceding digit: HALF_UP gives 2.67, HALF_EVEN would
+    # give 2.66, so this assertion actually pins the mode (2.675 would not, it
+    # rounds to 2.68 under both). This is the discriminating tie.
+    assert money.round_money(Decimal("2.665")) == Decimal("2.67")
 
 
 # invoice

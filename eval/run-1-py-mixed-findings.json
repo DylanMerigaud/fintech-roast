@@ -1,0 +1,311 @@
+{
+  "fixture": "fixture-py-mixed",
+  "findings": [
+    {
+      "rule": "API-3",
+      "file": "eval/fixture-py-mixed/money.py",
+      "line": 12,
+      "evidence": "def parse_amount(input: str) -> float: return float(input)",
+      "severity": "high",
+      "confidence": "high",
+      "fix": "validate then Decimal(input), never float()"
+    },
+    {
+      "rule": "FX-4",
+      "file": "eval/fixture-py-mixed/fx.py",
+      "line": 48,
+      "evidence": "total += invoice[\"total\"]",
+      "severity": "critical",
+      "confidence": "high",
+      "fix": "bucket per currency"
+    },
+    {
+      "rule": "FX-3",
+      "file": "eval/fixture-py-mixed/fx.py",
+      "line": 30,
+      "evidence": "invoice[\"total\"] = convert(...); invoice[\"currency\"] = payout_currency",
+      "severity": "high",
+      "confidence": "high",
+      "fix": "persist original amount+currency"
+    },
+    {
+      "rule": "FX-2",
+      "file": "eval/fixture-py-mixed/fx.py",
+      "line": 7,
+      "evidence": "RATES mutable module dict, no provenance",
+      "severity": "high",
+      "confidence": "high",
+      "fix": "capture rate value/source/timestamp"
+    },
+    {
+      "rule": "IDE-1",
+      "file": "eval/fixture-py-mixed/webhooks.py",
+      "line": 29,
+      "evidence": "credit_account(account_id, amount)",
+      "severity": "critical",
+      "confidence": "high",
+      "fix": "Dedup on event id"
+    },
+    {
+      "rule": "IDE-2",
+      "file": "eval/fixture-py-mixed/webhooks.py",
+      "line": 45,
+      "evidence": "retry POST no Idempotency-Key",
+      "severity": "critical",
+      "confidence": "high",
+      "fix": "Idempotency-Key header"
+    },
+    {
+      "rule": "IDE-3",
+      "file": "eval/fixture-py-mixed/store.py",
+      "line": 43,
+      "evidence": "new_balance = account.balance + amount",
+      "severity": "critical",
+      "confidence": "medium",
+      "fix": "atomic update"
+    },
+    {
+      "rule": "IDE-3",
+      "file": "eval/fixture-py-mixed/store.py",
+      "line": 57,
+      "evidence": "new_balance = account.balance - amount",
+      "severity": "critical",
+      "confidence": "medium",
+      "fix": "atomic update"
+    },
+    {
+      "rule": "IDE-4",
+      "file": "eval/fixture-py-mixed/db/schema.sql",
+      "line": 35,
+      "evidence": "event_id TEXT,",
+      "severity": "high",
+      "confidence": "high",
+      "fix": "NOT NULL UNIQUE"
+    },
+    {
+      "rule": "IDE-4",
+      "file": "eval/fixture-py-mixed/db/schema.sql",
+      "line": 29,
+      "evidence": "external_ref TEXT,",
+      "severity": "high",
+      "confidence": "medium",
+      "fix": "UNIQUE NOT NULL"
+    },
+    {
+      "rule": "LED-1",
+      "file": "eval/fixture-py-mixed/ledger.py",
+      "line": 62,
+      "evidence": "entry.amount = new_amount",
+      "severity": "critical",
+      "confidence": "high",
+      "fix": "append reversing entry"
+    },
+    {
+      "rule": "LED-2",
+      "file": "eval/fixture-py-mixed/ledger.py",
+      "line": 24,
+      "evidence": "post_entry single leg, no counter-account/transaction_id",
+      "severity": "critical",
+      "confidence": "high",
+      "fix": "balanced double-entry legs"
+    },
+    {
+      "rule": "LED-3",
+      "file": "eval/fixture-py-mixed/db/schema.sql",
+      "line": 4,
+      "evidence": "balance NUMERIC(6,2) mutated directly",
+      "severity": "high",
+      "confidence": "high",
+      "fix": "derive from entries"
+    },
+    {
+      "rule": "LED-4",
+      "file": "eval/fixture-py-mixed/db/schema.sql",
+      "line": 42,
+      "evidence": "ledger_entries no actor/reason, correct_entry overwrites",
+      "severity": "high",
+      "confidence": "high",
+      "fix": "add actor/reason, append-only"
+    },
+    {
+      "rule": "ROU-1",
+      "file": "eval/fixture-py-mixed/money.py",
+      "line": 27,
+      "evidence": "return round(value, 2)",
+      "severity": "high",
+      "confidence": "high",
+      "fix": "Decimal.quantize explicit mode"
+    },
+    {
+      "rule": "ROU-1",
+      "file": "eval/fixture-py-mixed/money.py",
+      "line": 17,
+      "evidence": "return round(amount * 100)",
+      "severity": "medium",
+      "confidence": "medium",
+      "fix": "Decimal explicit mode"
+    },
+    {
+      "rule": "STO-7",
+      "file": "eval/fixture-py-mixed/money.py",
+      "line": 32,
+      "evidence": "def to_decimal(amount: float) -> Decimal: return Decimal(amount)",
+      "severity": "critical",
+      "confidence": "high",
+      "fix": "Build Decimal from a string/int"
+    },
+    {
+      "rule": "STO-1",
+      "file": "eval/fixture-py-mixed/money.py",
+      "line": 12,
+      "evidence": "return float(input)",
+      "severity": "critical",
+      "confidence": "high",
+      "fix": "Parse into Decimal"
+    },
+    {
+      "rule": "STO-1",
+      "file": "eval/fixture-py-mixed/db/schema.sql",
+      "line": 10,
+      "evidence": "subtotal DOUBLE PRECISION",
+      "severity": "critical",
+      "confidence": "high",
+      "fix": "NUMERIC"
+    },
+    {
+      "rule": "STO-1",
+      "file": "eval/fixture-py-mixed/db/schema.sql",
+      "line": 12,
+      "evidence": "tax DOUBLE PRECISION",
+      "severity": "critical",
+      "confidence": "high",
+      "fix": "NUMERIC"
+    },
+    {
+      "rule": "STO-1",
+      "file": "eval/fixture-py-mixed/db/schema.sql",
+      "line": 13,
+      "evidence": "total DOUBLE PRECISION",
+      "severity": "critical",
+      "confidence": "high",
+      "fix": "NUMERIC"
+    },
+    {
+      "rule": "STO-1",
+      "file": "eval/fixture-py-mixed/db/schema.sql",
+      "line": 22,
+      "evidence": "unit_price REAL",
+      "severity": "critical",
+      "confidence": "high",
+      "fix": "NUMERIC"
+    },
+    {
+      "rule": "STO-1",
+      "file": "eval/fixture-py-mixed/db/schema.sql",
+      "line": 28,
+      "evidence": "amount DOUBLE PRECISION",
+      "severity": "critical",
+      "confidence": "high",
+      "fix": "NUMERIC"
+    },
+    {
+      "rule": "STO-1",
+      "file": "eval/fixture-py-mixed/db/schema.sql",
+      "line": 38,
+      "evidence": "amount DOUBLE PRECISION",
+      "severity": "critical",
+      "confidence": "high",
+      "fix": "NUMERIC"
+    },
+    {
+      "rule": "STO-1",
+      "file": "eval/fixture-py-mixed/db/schema.sql",
+      "line": 44,
+      "evidence": "amount DOUBLE PRECISION",
+      "severity": "critical",
+      "confidence": "high",
+      "fix": "NUMERIC"
+    },
+    {
+      "rule": "STO-2",
+      "file": "eval/fixture-py-mixed/db/schema.sql",
+      "line": 4,
+      "evidence": "balance NUMERIC(6,2)",
+      "severity": "high",
+      "confidence": "high",
+      "fix": "Widen precision"
+    },
+    {
+      "rule": "STO-4",
+      "file": "eval/fixture-py-mixed/db/schema.sql",
+      "line": 4,
+      "evidence": "no currency column",
+      "severity": "high",
+      "confidence": "high",
+      "fix": "Add currency_code"
+    },
+    {
+      "rule": "STO-5",
+      "file": "eval/fixture-py-mixed/money.py",
+      "line": 17,
+      "evidence": "return round(amount * 100)",
+      "severity": "high",
+      "confidence": "high",
+      "fix": "ISO 4217 exponent"
+    },
+    {
+      "rule": "STO-5",
+      "file": "eval/fixture-py-mixed/money.py",
+      "line": 22,
+      "evidence": "return minor / 100",
+      "severity": "high",
+      "confidence": "high",
+      "fix": "per-currency exponent"
+    },
+    {
+      "rule": "STO-5",
+      "file": "eval/fixture-py-mixed/money.py",
+      "line": 27,
+      "evidence": "return round(value, 2)",
+      "severity": "high",
+      "confidence": "high",
+      "fix": "currency exponent"
+    },
+    {
+      "rule": "TAX-2",
+      "file": "eval/fixture-py-mixed/tax.py",
+      "line": 43,
+      "evidence": "tax = money.round_money(gross - gross / (Decimal(1) + SALES_TAX_RATE))",
+      "severity": "high",
+      "confidence": "high",
+      "fix": "derive tax = gross - net after rounding net once"
+    },
+    {
+      "rule": "TIM-1",
+      "file": "eval/fixture-py-mixed/db/schema.sql",
+      "line": 14,
+      "evidence": "issued_at TIMESTAMP NOT NULL",
+      "severity": "high",
+      "confidence": "high",
+      "fix": "use timestamptz"
+    },
+    {
+      "rule": "TIM-1",
+      "file": "eval/fixture-py-mixed/db/schema.sql",
+      "line": 47,
+      "evidence": "created_at TIMESTAMP NOT NULL",
+      "severity": "high",
+      "confidence": "high",
+      "fix": "use timestamptz"
+    },
+    {
+      "rule": "TST-2",
+      "file": "eval/fixture-py-mixed/test_money.py",
+      "line": 42,
+      "evidence": "assert money.round_money(Decimal(\"2.675\")) == Decimal(\"2.68\")",
+      "severity": "medium",
+      "confidence": "medium",
+      "fix": "add a tie where HALF_UP and HALF_EVEN diverge (1.005); 2.675 passes under both modes"
+    }
+  ]
+}

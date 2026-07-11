@@ -1,0 +1,1 @@
+{"domain": "TAX", "findings": [{"rule": "TAX-2", "file": "eval/fixture-py-mixed/tax.py", "line": 43, "evidence": "tax = money.round_money(gross - gross / (Decimal(1) + SALES_TAX_RATE))", "severity": "high", "confidence": "high", "fix": "derive tax = gross - net after rounding net once"}]}
