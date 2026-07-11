@@ -1,10 +1,10 @@
-"""Tests for the clean fiscal modules (tax, fx, interest, reports).
-
-These deliberately exercise the cases the buggy fixture's suite avoided: the
-per-line and on-total tax paths agree on a multi-line invoice, a convert-and-back
-round trip, mixed-currency revenue, a DST-crossing date range, and a boundary
-transaction landing in exactly one period.
-"""
+\
+\
+\
+\
+\
+\
+\
 
 import sys
 import pathlib
@@ -23,8 +23,6 @@ def utc(year, month, day, hour=0):
     return datetime(year, month, day, hour, tzinfo=timezone.utc)
 
 
-# ----- tax -----
-
 def test_tax_paths_agree_on_multi_line_invoice():
     lines = [Decimal("33.33"), Decimal("66.67"), Decimal("10.01")]
     on_total = tax.invoice_tax(sum(lines, Decimal(0)))
@@ -37,8 +35,6 @@ def test_extract_tax_reconstructs_gross():
     assert result["net"] + result["tax"] == Decimal("108.25")
 
 
-# ----- fx -----
-
 def test_convert_tags_the_rate():
     result = fx.convert(Decimal("100.00"), "USD", "EUR")
     assert result.amount == Decimal("92.00")
@@ -47,7 +43,7 @@ def test_convert_tags_the_rate():
 
 
 def test_convert_back_uses_reciprocal_rate():
-    # The reverse rate is derived as 1 / forward, not an independent quote.
+
     reverse = fx.get_rate("EUR", "USD")
     assert reverse.value == Decimal(1) / Decimal("0.92")
 
@@ -65,16 +61,14 @@ def test_total_revenue_across_currencies():
         {"total": Decimal("92.00"), "currency": "EUR"},
     ]
     result = fx.total_revenue(invoices, "USD")
-    # 100 USD + 92 EUR (-> 100 USD) = 200 USD.
+
     assert result.amount == Decimal("200.00")
     assert result.currency == "USD"
 
 
-# ----- interest -----
-
 def test_days_across_a_dst_boundary():
-    # March 2026 in a DST-observing wall clock has a 23-hour day, but calendar
-    # date arithmetic still counts whole days correctly.
+
+
     assert interest.days_between(date(2026, 3, 1), date(2026, 4, 1)) == 31
 
 
@@ -92,12 +86,10 @@ def test_boundary_transaction_lands_in_one_period():
     txns = [interest.Transaction(at=boundary)]
     jan = interest.transactions_in_period(txns, utc(2026, 1, 1), boundary)
     feb = interest.transactions_in_period(txns, boundary, utc(2026, 3, 1))
-    # Half-open [start, end): the boundary txn is in February only, never both.
+
     assert len(jan) == 0
     assert len(feb) == 1
 
-
-# ----- reports -----
 
 def test_sum_amounts_no_float_drift():
     amounts = [Decimal("0.1"), Decimal("0.2")]

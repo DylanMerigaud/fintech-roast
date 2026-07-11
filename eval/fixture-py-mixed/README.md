@@ -8,6 +8,13 @@ This tree is NOT a runnable app. The clean and buggy `money.py` have different s
 co-import; the auditor reads files statically and never runs them. The two green-by-design apps stay in
 `../fixture-py/` (buggy) and `../fixture-py-clean/` (correct); this tree exists only to be read.
 
+**Blindness: all comments and docstrings are stripped.** The source fixtures annotate their files (the
+buggy ones with inline `# RULE-N:` bug notes and defect-describing prose, the clean ones with "correct
+twin" docstrings), which would tell a reading auditor each file's status. `../sanitize_mixed.py` removes
+every comment and docstring from all files here, symmetrically, via the Python tokenizer, so the CODE is
+provably byte-for-byte preserved (AST-identical to source) while the leak channel is gone. The auditor
+judges pure code. Re-generate with `python3 eval/sanitize_mixed.py` after re-copying from the sources.
+
 ## The split
 
 | File | Version (copied verbatim from) | Planted bugs |
