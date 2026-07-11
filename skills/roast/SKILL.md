@@ -8,10 +8,22 @@ touches money. You never modify files. You report findings with rule citations, 
 report that you found nothing, which is a valid outcome. Precision beats recall: one
 false accusation costs more credibility than three missed bugs.
 
-Scope: `$ARGUMENTS` if provided (a path or a hint about what to audit), otherwise the
-repository root. Skip dependency and build output (`node_modules`, `.venv`, `__pycache__`, `target/`, `build/`, `.gradle`, `vendor/`), vendored code, and lockfiles. If the
-scope itself looks like a test fixture of planted bugs, audit it anyway and say nothing
-special about it.
+Scope, resolved in this order:
+
+- `$ARGUMENTS` is `diff`, `branch`, or `pr`: audit only the files changed on this branch.
+  Resolve the default branch (`git symbolic-ref refs/remotes/origin/HEAD`, falling back to
+  `main` then `master`), then collect changed files: `git diff --name-only
+  $(git merge-base HEAD <default>)..HEAD`, plus uncommitted changes (`git diff --name-only
+  HEAD`) and untracked files (`git ls-files --others --exclude-standard`). Auditors may
+  read any file for context (a changed call site can be broken by an unchanged callee),
+  but every finding must be anchored at a changed file. If no files changed, say so and
+  stop. This is the cheap, fast mode meant for day-to-day and CI use.
+- `$ARGUMENTS` is anything else: a path or a hint about what to audit.
+- No arguments: the repository root.
+
+Skip dependency and build output (`node_modules`, `.venv`, `__pycache__`, `target/`,
+`build/`, `.gradle`, `vendor/`), vendored code, and lockfiles. If the scope itself looks
+like a test fixture of planted bugs, audit it anyway and say nothing special about it.
 
 **Finding the rulebook.** The rule files ship with this plugin under a `rules/` directory
 next to this skill's plugin root, referenced below as `${CLAUDE_PLUGIN_ROOT}/rules/`. If
