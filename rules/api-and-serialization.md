@@ -60,6 +60,7 @@ class Invoice {
 - Zero-decimal or approximate values where sub-unit precision is irrelevant and the magnitude stays well under 2^53: a JPY integer amount, a display-only rounded figure, or a percentage/FX-rate field that is genuinely a rate rather than a settled money amount.
 - Internal service-to-service payloads over a non-JSON codec (Protobuf, Avro, gRPC) whose money type is an integer or a fixed-point/decimal type, even if a JSON transcoding exists, because the canonical wire type is not binary64.
 - A field named `amount` that is not money at all (a row count, a quantity of items, an amount of time in seconds) where float or large-integer semantics are fine.
+- A double that only transports a decimal value, with no arithmetic performed on it: a JSON number parsed into binary64 and immediately converted through a shortest-decimal path (`BigDecimal.valueOf(double)` in Java, `Decimal(str(x))` in Python) round-trips exactly for any amount with 15 or fewer significant digits, in both directions. A float-typed DTO field bridged this way is type hygiene worth cleaning up, not a money defect on its own; the defect requires float arithmetic on the amount, magnitudes that can leave the exact range, or a consumer that keeps computing in binary64. (Field-verified refutation pattern.)
 
 **Sources**
 

@@ -180,6 +180,7 @@ BigDecimal rate = new BigDecimal("0.0825");
 - A float used only for transient display or a non-authoritative estimate (a UI preview) where the persisted or charged figure is recomputed in decimal or integer minor units; floats in throwaway presentation code are not a money-safety defect.
 - A DECIMAL or NUMERIC rate column, or a basis-points integer, that merely passes through a variable typed to hold it losslessly (e.g. a language decimal type), even if the surrounding API names look float-ish; the test is whether an inexact binary value ever enters the money math.
 - Statistical or analytics aggregates (effective-tax-rate reporting, dashboards) that are explicitly approximate and never drive a charge, remittance, or ledger entry.
+- An amount (not a rate) that transits a float-typed field but is converted through a shortest-decimal path (`BigDecimal.valueOf(double)`, `Decimal(str(x))`) before any arithmetic: exact for values with 15 or fewer significant digits, so no inexact binary value enters the tax math. The rule's test is unchanged; this spells out that shortest-decimal bridges pass it. (Field-verified refutation pattern.)
 
 **Sources**
 

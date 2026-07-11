@@ -42,6 +42,7 @@ Math.Round(x, 2, MidpointRounding.AwayFromZero)                   // C#
 - Rounding for display or formatting only, where the rounded string is never fed back into a stored balance or a downstream calculation (the authoritative amount stays full-precision).
 - Non-monetary quantities (progress bars, analytics percentages, UI layout) where a fraction of a unit has no financial meaning.
 - Java code that intentionally omits the mode (or passes `RoundingMode.UNNECESSARY`) to force an `ArithmeticException` when a division is not exact, using it as a guard that the operation must be representable.
+- A rounding call whose inputs provably already sit at or below the target scale, so the mode can never fire: e.g. a serializer widening scale-3 column values to scale 4, where HALF_UP and HALF_EVEN produce byte-identical output on every reachable input. A mixed-mode "policy inconsistency" is only a defect if some reachable value actually rounds; trace the input scales (column definitions, upstream setScale calls) before flagging one. (Field-verified refutation pattern.)
 
 **Sources**
 

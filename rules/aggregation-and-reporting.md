@@ -128,6 +128,7 @@ private BigDecimal balance;
 - ORDER BY on a non-unique or mutable key (e.g. ORDER BY created_at without a unique tiebreaker), so rows with equal keys can reshuffle between page fetches.
 - Streaming or keyset pagination whose `WHERE key > :last` boundary can be crossed by updates that change the sort key mid-scan, or that runs outside a single snapshot when exactness is required.
 - A multi-page read of a financial dataset with no single-snapshot guarantee: pages served under READ COMMITTED across separate transactions, no repeatable-read or serializable snapshot and no immutable cursor key.
+- A sync or reconciliation job that infers MEMBERSHIP from an offset scan of live data: everything not seen this pass is marked deleted, inactive, or orphaned. This is the same shifted-window failure applied to record existence instead of a sum; a row displaced out of the scan window becomes a phantom deletion of a financial record. (Field-verified, including a case where the deletion-threshold guard read its counter before anything wrote it and so never fired.)
 
 **Why it breaks**
 

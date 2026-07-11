@@ -16,6 +16,14 @@ For EACH finding:
 3. Attack the finding: is this display-only code, a test helper, a rate rather than an
    amount, dead or vendored code, already mitigated a layer above or below, or a
    misreading of the code? Is the severity inflated for what the code actually risks?
+   Two attacks that kill often (verify mechanically, do not just assert them): trace the
+   input scales, because a "wrong rounding mode" whose inputs already sit at the target
+   scale never fires; and apply the shortest-decimal standard, because a double that only
+   transports a value (no float arithmetic, under 16 significant digits) round-trips
+   exactly and cannot corrupt money. Conversely, do not stop at the first mitigation you
+   find: check that a guard actually executes (a threshold read before anything writes it
+   never fires) and that a "self-healing" path really heals (a content-hash short-circuit
+   can skip the recovery event).
 4. Verdict:
    - `confirmed`: survives your attack; you could defend it to a skeptical CTO.
    - `likely`: probably real, but context you cannot see (deploy config, upstream
