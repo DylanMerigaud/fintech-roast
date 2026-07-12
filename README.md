@@ -145,7 +145,9 @@ up alongside them:
 - [`eval/FIELD-REPORT-2.md`](eval/FIELD-REPORT-2.md): [medusajs/medusa](https://github.com/medusajs/medusa)
   at a pinned commit, so it is fully reproducible. 16 emitted, 4 confirmed (a
   check-then-act concurrency cluster), 2 likely, 10 refuted, several of the refutations
-  turning on the same false-positive notes the rulebook documents.
+  turning on the same false-positive notes the rulebook documents. The confirmed cluster
+  was filed upstream with a failing test:
+  [medusajs/medusa#16012](https://github.com/medusajs/medusa/issues/16012).
 
 ## Contributing
 

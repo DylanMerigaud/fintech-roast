@@ -23,17 +23,21 @@ public repository at a pinned commit.
 | refuted before reporting | 10 |
 
 The confirmed findings are one coherent cluster: check-then-act on money state with no
-serialization. They are adversarially verified, **not yet human-verified**; see the status
-column. Nothing here has been filed upstream.
+serialization. They were filed upstream as a single issue with a failing test:
+[medusajs/medusa#16012](https://github.com/medusajs/medusa/issues/16012). Before filing,
+each was re-verified against the source at the pinned commit (which is the current
+`develop` HEAD), confirmed to have no existing open duplicate, and matched to Medusa's own
+`describe("concurrency")` test block, which encodes the racy behavior as passing only
+because its amounts sum exactly to the authorization.
 
 ## Confirmed findings (pending human verification, then upstream issues)
 
-| Rule | Location (at pinned commit) | Defect | Human |
+| Rule | Location (at pinned commit) | Defect | Status |
 | --- | --- | --- | --- |
-| IDE-3 | `packages/modules/payment/src/services/payment-module.ts` ~787 (`capturePayment_`) | Captures relation read before the transaction opens; the over-capture guard is check-then-act at READ COMMITTED with no row lock, version, or unique constraint, and no caller (admin route or workflow) adds a lock or idempotency key. Two concurrent captures both pass the guard; the Stripe provider swallows the already-captured error, so both rows persist and additive-capture providers double-move money. | pending |
-| IDE-3 | `packages/modules/payment/src/services/payment-module.ts` ~942 (`refundPayment_`) | Same unserialized check-then-act for refunds, with per-refund-row idempotency keys, so two concurrent partial refunds both pass and `stripe.refunds.create` moves real money twice. | pending |
-| IDE-3 | `packages/modules/promotion/src/services/promotion-module.ts` ~369 (campaign budget `used`) | `registerUsage` runs under the cart-completion lock keyed on the cart id only, so two carts redeeming the same promotion concurrently both read `used = X` and both write `X + amount` as an absolute value (no `FOR UPDATE`, no version): a lost update that lets a spend-capped campaign budget be exceeded. | pending |
-| IDE-3 | `packages/modules/promotion/src/services/promotion-module.ts` ~229 (per-attribute usage) | The update branch reads `used`, adds 1, writes the absolute value with no lock; the partial unique index on `(attribute_value, budget_id)` only serializes the insert branch, so one customer completing two carts concurrently exceeds a per-customer usage limit. | pending |
+| IDE-3 | `packages/modules/payment/src/services/payment-module.ts` ~787 (`capturePayment_`) | Captures relation read before the transaction opens; the over-capture guard is check-then-act at READ COMMITTED with no row lock, version, or unique constraint, and no caller (admin route or workflow) adds a lock or idempotency key. Two concurrent captures both pass the guard; the Stripe provider swallows the already-captured error, so both rows persist and additive-capture providers double-move money. | filed #16012 |
+| IDE-3 | `packages/modules/payment/src/services/payment-module.ts` ~942 (`refundPayment_`) | Same unserialized check-then-act for refunds, with per-refund-row idempotency keys, so two concurrent partial refunds both pass and `stripe.refunds.create` moves real money twice. | filed #16012 |
+| IDE-3 | `packages/modules/promotion/src/services/promotion-module.ts` ~369 (campaign budget `used`) | `registerUsage` runs under the cart-completion lock keyed on the cart id only, so two carts redeeming the same promotion concurrently both read `used = X` and both write `X + amount` as an absolute value (no `FOR UPDATE`, no version): a lost update that lets a spend-capped campaign budget be exceeded. | filed #16012 |
+| IDE-3 | `packages/modules/promotion/src/services/promotion-module.ts` ~229 (per-attribute usage) | The update branch reads `used`, adds 1, writes the absolute value with no lock; the partial unique index on `(attribute_value, budget_id)` only serializes the insert branch, so one customer completing two carts concurrently exceeds a per-customer usage limit. | filed #16012 |
 
 Common fix shape: replace the read-check-write with a single atomic guarded UPDATE
 (`SET used = used + :amt WHERE ... AND used + :amt <= :limit`, 0 rows meaning exceeded),
