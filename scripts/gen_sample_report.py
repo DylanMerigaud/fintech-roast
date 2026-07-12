@@ -80,6 +80,18 @@ report = "\n\n".join(blocks) + "\n\n" + "-" * 96 + "\n" + summary
 
 doc = f"""# Sample report
 
+**What it finds on real code** (not the planted fixture below): two runs on production
+codebases are written up in [`eval/FIELD-REPORT-1.md`](../eval/FIELD-REPORT-1.md) (a private
+repo, anonymized: 18 findings confirmed, 1 critical) and
+[`eval/FIELD-REPORT-2.md`](../eval/FIELD-REPORT-2.md)
+([medusajs/medusa](https://github.com/medusajs/medusa) at a pinned commit: 4 confirmed,
+filed upstream with a failing test as
+[medusajs/medusa#16012](https://github.com/medusajs/medusa/issues/16012)). Those show the
+tool on code nobody wrote to be found, including the findings the verifier refuted. The
+report below is the fixture run, kept because it exercises every domain at once.
+
+---
+
 This is the full report of run 1 on the TypeScript planted-bug fixture
 ([`eval/fixture/`](../eval/fixture/)): the same run the README gif replays and
 [`eval/RESULTS.md`](../eval/RESULTS.md) scores (86 percent recall, every finding mapping to a

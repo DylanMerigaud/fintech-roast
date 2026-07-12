@@ -46,9 +46,16 @@ verified per domain.
    production codebase, N on Medusa with links to accepted issues), honest limits
    paragraph (self-planted evals, verifier not human, languages covered). No em-dashes,
    no marketing fluff. Done when: draft committed; posting is the owner's manual call.
-6. **Directory listings.** Submit the plugin to awesome-claude-code and any active
-   Claude Code plugin directories (search current lists at execution time; they change).
-   Done when: PRs opened to at least two lists.
+6. **Directory listings.** NOT a PR, and NOT yet. Checked 2026-07: awesome-claude-code
+   accepts recommendations ONLY via its web UI issue-form template (no PR, no `gh` CLI, or
+   you risk being restricted), the submitter must be a human, and its own guidelines say to
+   get users first and submit selectively (do not submit as a promotion strategy). With the
+   repo at ~1 star, submitting now reads as premature promotion and would likely be passed
+   over. So: after launch generates some traction (stars, HN discussion, maintainer
+   engagement on #16012), the owner submits via the web UI issue form personally, one-line
+   description (not a sales pitch, no emoji). Re-check current directories and their rules
+   at that time; they change. This task is owner-manual and gated on traction, not a
+   codebase change.
 
 ## Phase 3: product depth (independent of phase 2)
 
