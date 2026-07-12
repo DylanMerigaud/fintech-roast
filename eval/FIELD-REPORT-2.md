@@ -30,7 +30,7 @@ each was re-verified against the source at the pinned commit (which is the curre
 `describe("concurrency")` test block, which encodes the racy behavior as passing only
 because its amounts sum exactly to the authorization.
 
-## Confirmed findings (pending human verification, then upstream issues)
+## Confirmed findings (filed upstream as [medusajs/medusa#16012](https://github.com/medusajs/medusa/issues/16012))
 
 | Rule | Location (at pinned commit) | Defect | Status |
 | --- | --- | --- | --- |
@@ -106,7 +106,4 @@ project.
    with a mechanical proof instead of a hand-wave.
 
 Findings are rule-based and adversarially verified, but not human-verified. Read the cited
-rule before acting; every rule documents its false positives. Next step for the confirmed
-findings is a manual verification pass against the source at the pinned commit, then polite
-upstream issues, one per finding, each carrying the rule citation and a concrete failing
-interleaving.
+rule before acting; every rule documents its false positives.

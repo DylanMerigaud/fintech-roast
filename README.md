@@ -46,7 +46,7 @@ What to expect before you run it:
   On a mid-size repo, budget tens of minutes and a meaningful slice of your usage. `diff`
   mode audits only what changed on your branch and is the cheap, day-to-day invocation.
 - **A guaranteed first run.** If you want to see it work before pointing it at your own
-  code, clone this repo and run `/fintech-roast:roast eval/fixture`. The fixture has 37
+  code, clone this repo and run `/fintech-roast:roast eval/fixture`. The fixture has 35
   planted bugs, so the first run cannot come back empty.
 
 ## Why this exists, and what it is not
@@ -118,10 +118,10 @@ roasted exactly once. Opt-in per clone; each run spends your session usage.
 all ten domains, and an answer key. The fixture compiles clean and its tests pass, because
 the tests use round numbers and one currency, which is the point (see TST-2, TST-3). The
 scorer (`eval/score.py`) measures how many planted bugs the agent finds and how many of its
-findings land on a real planted bug. There is a fixture per language, each with 37 planted
-bugs across the ten domains: TypeScript ([`eval/fixture/`](eval/fixture/)), Python
-([`eval/fixture-py/`](eval/fixture-py/)), and Java + Spring Boot + JPA
-([`eval/fixture-java/`](eval/fixture-java/)). Per-language runs are tracked separately, each
+findings land on a real planted bug. There is a fixture per language, planted
+across all ten domains: TypeScript with 35 bugs ([`eval/fixture/`](eval/fixture/)), and
+Python ([`eval/fixture-py/`](eval/fixture-py/)) and Java + Spring Boot + JPA
+([`eval/fixture-java/`](eval/fixture-java/)) with 37 each. Per-language runs are tracked separately, each
 with its own method and caveats so the numbers are not read out of context:
 
 | Language | Fixture | Method | Recall | Report |
@@ -139,7 +139,7 @@ The fixtures are bugs we planted ourselves. Two runs on real production code are
 up alongside them:
 
 - [`eval/FIELD-REPORT-1.md`](eval/FIELD-REPORT-1.md): a private codebase (with permission,
-  anonymized). 36 findings emitted, 18 confirmed (1 critical), 14 refuted by the
+  anonymized). 36 findings emitted, 18 confirmed (1 critical), 4 likely, 14 refuted by the
   adversarial pass, and the lesson that a scoped roast of a well-built core reports clean
   while the full surface does not.
 - [`eval/FIELD-REPORT-2.md`](eval/FIELD-REPORT-2.md): [medusajs/medusa](https://github.com/medusajs/medusa)

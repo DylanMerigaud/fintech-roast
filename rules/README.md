@@ -1,6 +1,6 @@
 # The rulebook
 
-~40 rules about how code that touches money actually breaks, organized by domain. This is
+41 rules about how code that touches money actually breaks, organized by domain. This is
 the product; the agent that applies them is the delivery mechanism.
 
 Every rule went through two passes: a research pass (each claim backed by at least two
