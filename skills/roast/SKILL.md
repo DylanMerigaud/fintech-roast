@@ -58,6 +58,24 @@ ROU rounding-and-allocation, IDE idempotency-and-concurrency, LED ledger-design,
 fx-and-multicurrency, TIM time-and-dates, AGG aggregation-and-reporting, TAX taxes,
 API api-and-serialization, TST testing.
 
+While building the shortlist, also record two things to pass to auditors, because they cut
+wasted tokens sharply:
+
+- **The repo's money-code language(s)** (from the file extensions of the candidates:
+  TypeScript/JavaScript, Python, Java, C#, Ruby, Go). Most repos are one or two. The rule
+  files carry per-language detection/fix bullets for all of them; an auditor told the repo
+  is TypeScript should read only the shared prose and the TS bullets and skip the Java,
+  Python, C#, Ruby, and Go bullets in its rule file.
+- **Line ranges, not whole files, wherever a candidate file is large** (say over ~150
+  lines) and the money surface is a few functions in it. Hand the auditor
+  `path:startLine-endLine` for the money-touching blocks (the grep hits plus the enclosing
+  function), not the whole path. The auditor may still widen when evidence points outside
+  the range, but it starts narrow instead of reading a 500-line file to judge 20 lines.
+
+Gate the shortlist: only keep a file for a domain if it has a real signature match for
+that domain (an actual amount/rate/schema/webhook hit), not just a generic identifier.
+A domain whose shortlist is empty after this gate gets no auditor (see Step 2).
+
 If no money surfaces exist, say so and stop; do not force findings out of a repo that
 does not handle money.
 
@@ -67,20 +85,35 @@ For each domain with a non-empty shortlist, spawn one `fintech-roast:money-domai
 subagent, all in parallel. Each auditor's prompt must contain:
 
 - the absolute path to its rules file: `${CLAUDE_PLUGIN_ROOT}/rules/<domain-file>`
-- the candidate file list for its domain (absolute paths)
+- the candidate file list for its domain, as `path:startLine-endLine` ranges where you
+  scoped them in Step 1, or bare absolute paths for small files
+- the repo's money-code language(s) from Step 1, with the instruction: read the shared
+  prose of every rule and only the detection/fix bullets for those languages, skipping the
+  other languages' bullets
 - the repo root, and the instruction to return findings as JSON only
 
 Do not spawn auditors for domains with no candidate files. TST runs whenever any other
 domain has candidates (it audits the tests of the money code that exists).
 
+On large repositories this fan-out dominates the token cost. Three things keep it in
+check, in order of savings: hand auditors line ranges rather than whole files (Step 1),
+pass the language(s) so each auditor skips the rulebook's other-language bullets, and let
+the verifier reuse the finding's snippet instead of re-reading source (Step 3). Scoping the
+run to a subsystem or to a diff (see the Scope section) is the biggest lever of all when
+you do not need a whole-repo sweep.
+
 ## Step 3: adversarial verification
 
 Collect all findings. If there are none, skip to the report. Otherwise spawn
 `fintech-roast:finding-verifier` subagents (one per domain that produced findings, in
-parallel), each receiving its domain's findings JSON plus the same rules file path. The
-verifier's job is to REFUTE each finding; it returns a verdict per finding: `confirmed`,
-`likely`, or `refuted` with a reason. Drop every `refuted` finding. Keep the verifier
-verdicts; they become the confidence tier in the report.
+parallel), each receiving its domain's findings JSON (including the `snippet` each finding
+carries) plus the same rules file path and the repo's language(s). The verifier's job is
+to REFUTE each finding; it returns a verdict per finding: `confirmed`, `likely`, or
+`refuted` with a reason. The verifier reuses the finding's snippet and only re-opens the
+source file when the snippet is insufficient to rule (a claim about callers, a constraint,
+or an interleaving it must trace); this avoids re-reading files the auditor already read.
+Drop every `refuted` finding. Keep the verifier verdicts; they become the confidence tier
+in the report.
 
 ## Step 4: report
 

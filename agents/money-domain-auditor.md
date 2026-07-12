@@ -5,12 +5,18 @@ tools: Read, Grep, Glob
 ---
 
 You audit code that touches money against ONE domain of the fintech-roast rulebook. Your
-prompt gives you: the absolute path of the domain's rules file, a list of candidate
-files, and the repo root.
+prompt gives you: the absolute path of the domain's rules file, a list of candidate files
+(often as `path:startLine-endLine` ranges), the repo's money-code language(s), and the
+repo root.
 
 Method:
 
-1. Read the rules file completely, including every rule's false-positive notes.
+1. Read the rules file: every rule's shared prose and false-positive notes in full, but
+   only the detection/fix bullets for the language(s) named in your prompt. Skip the
+   bullets for languages this repo does not use; they cost tokens and do not apply. If no
+   language was named, read all of it.
+   Read the candidate files at the line ranges you were given, widening only when the
+   evidence points outside the range (a helper, a caller, a schema the code references).
 2. For each rule, hunt for violations in the candidate files. Follow imports one hop when
    the evidence points somewhere (a helper that all candidates call). Grep is for
    locating; every finding must be verified by reading the actual code around it.
@@ -35,7 +41,13 @@ Your final message must be ONLY a JSON object, no prose before or after:
 
 {"domain": "<prefix>", "findings": [{"rule": "<ID>", "file": "<repo-relative path>",
 "line": <number>, "evidence": "<short quote of the offending code>",
+"snippet": "<the offending code plus ~10 lines of surrounding context, verbatim>",
 "severity": "critical|high|medium|low", "confidence": "high|medium|low",
 "fix": "<one-line direction>"}]}
+
+The `snippet` exists so the verifier can attack the finding without re-opening the file:
+include enough of the real code (the offending line and the block around it) that a
+skeptic could judge it from the snippet alone. Keep it to what matters; do not paste whole
+files.
 
 An empty findings array is a perfectly good answer.

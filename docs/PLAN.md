@@ -74,6 +74,18 @@ verified per domain.
    asymmetric. Done when: SKILL.md documents the mode and the fixture run still finds
    the planted bugs in default mode.
 
+## Done (recorded for continuity)
+
+- **Field report 2 (Medusa) filed upstream** as [medusajs/medusa#16012](https://github.com/medusajs/medusa/issues/16012),
+  with a failing test, after human-equivalent re-verification at HEAD. Phase 1 tasks 1-3
+  effectively complete for the Medusa run.
+- **Token-efficiency pass** (skill + agents): Step 1 now records the repo's language(s) and
+  hands auditors line ranges instead of whole files; auditors read only their languages'
+  rule bullets; the verifier reuses each finding's `snippet` and re-reads source only when
+  necessary. Biggest lever remains scoping to a subsystem or diff. The rulebook was NOT
+  split per language on purpose: measurement showed each auditor already loads one domain
+  file, so a split would add maintenance cost for under ~2% savings per run.
+
 ## Phase 4: coverage growth (backlog, any order)
 
 10. **Go rulebook column.** Add per-language detection/fix bullets for Go to each rule
