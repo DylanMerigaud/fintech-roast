@@ -102,6 +102,14 @@ the verifier reuse the finding's snippet instead of re-reading source (Step 3). 
 run to a subsystem or to a diff (see the Scope section) is the biggest lever of all when
 you do not need a whole-repo sweep.
 
+The stages differ in how much reasoning they need. The auditors' hunt (finding a real
+defect and defending it) is the sharp work; the Step 1 scout (grep and shortlist) and the
+verifier's snippet-based ruling are more mechanical. If your harness lets you pick the
+subagent model, a cheaper model for the scout and verifier with the strong model reserved
+for the auditors is a reasonable split; keep the strong model on verification for a
+high-stakes run (an external repo you intend to file against), where a wrong verdict is the
+expensive mistake.
+
 ## Step 3: adversarial verification
 
 Collect all findings. If there are none, skip to the report. Otherwise spawn
