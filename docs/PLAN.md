@@ -100,6 +100,22 @@ verified per domain.
     but stagger after phase 1 issues get maintainer reactions, so the method can absorb
     feedback.
 
+## Regression guard for pipeline edits (read before touching the skill or agents)
+
+CI validates the rulebook format and runs the fixture test suites, but it does NOT re-run
+the roast or re-score recall (running the full agent fan-out on every push is slow,
+token-costly, and nondeterministic, the same reason the evals are run-and-archive). So any
+edit to `skills/roast/SKILL.md` or `agents/*.md` can silently degrade recall or precision
+with no automated signal. After such an edit, before merging:
+
+1. Run `/fintech-roast:roast eval/fixture` (the TypeScript planted-bug fixture).
+2. Capture the findings JSON and score it: `python3 eval/score.py <findings.json>`.
+3. Confirm recall has not dropped below the archived baseline in `eval/RESULTS.md`
+   (86 percent cold scan). A drop means the edit hurt; investigate before merging.
+
+This is a manual gate on purpose. Do not add a CI job that runs the roast; document and
+enforce the check instead.
+
 ## Standing constraints for executors
 
 - The skill and agents are read-only by contract; any state (baselines, reports) is
